@@ -388,7 +388,7 @@ function diaryView(){
     let prev="";
     groups.forEach(g=>{const it=S.items.get(g.id);if(!it)return;let meta;
       if(g.kind==="movie"){const re=g.re;
-        meta=scorePill(it)+(lovedOf(it)?'<span class="dheart" aria-label="Loved">♥</span>':"")+(re?'<span class="drewatch" title="Rewatch" aria-label="Rewatch">'+ICON.rewatch+'</span>':"")+confBadge(g.c)+(!scoreOf(it)&&!re&&g.c==="confirmed"?'<span class="dsub">Film</span>':"");}
+        meta=scorePill(it)+(lovedOf(it)?'<span class="dheart" aria-label="Loved">♥</span>':"")+(re?'<span class="drewatch" title="Rewatch" aria-label="Rewatch">'+ICON.rewatch+'</span>':"")+confBadge(g.c);}
       else{const e=g.eps.sort((a,b)=>a.s-b.s||a.e-b.e);
         meta=(e.length===1?'<span class="dsub"><b class="mono">'+code(e[0].s,e[0].e)+'</b> '+esc(e[0].t||"")+'</span>':'<span class="dsub"><b class="mono">'+code(e[0].s,e[0].e)+'–'+(e[0].s===e[e.length-1].s?"E"+pad(e[e.length-1].e):code(e[e.length-1].s,e[e.length-1].e))+'</b> '+e.length+' episodes</span>')+(g.re?'<span class="drewatch" title="Rewatch" aria-label="Rewatch">'+ICON.rewatch+'</span>':"")+confBadge(g.c);}
       const show=g.date!==prev;prev=g.date;

@@ -394,3 +394,4 @@ textarea{width:100%;box-sizing:border-box;min-height:96px;border:1px solid var(-
 .fix-banner.warn{background:#FFF6E0;border-color:#F1DDA6}
 .fix-banner > div:first-child{flex:1 1 240px;min-width:0}
 .fix-banner .bar{flex:1 1 100%}
+.dbox.undated{visibility:hidden;width:0;margin-right:-12px}
