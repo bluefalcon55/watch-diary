@@ -146,6 +146,14 @@ async function buildFromTmdb(kind,id){
     by:((d.networks||[])[0]||{}).name||"",genre:(d.genres||[]).slice(0,2).map(g=>g.name).join(", "),blurb:d.overview||"",poster:d.poster_path||null,
     status:d.status||"",shelf:"notstarted",score:0,seasons,refreshedAt:Date.now(),addedAt:Date.now()};
 }
+/* Once a day at most, on app start: ask TMDB about shows you're caught up on that are
+   still airing, so they move back to "Up next" by themselves when a new episode airs. */
+let caughtChecked=false;
+async function checkCaughtUp(){
+  if(caughtChecked)return;caughtChecked=true;
+  const due=[...S.items].filter(([,it])=>it.kind==="show"&&it.tmdb&&it.shelf==="watching"&&!ended(it)&&!nextUp(it)&&(!it.refreshedAt||Date.now()-it.refreshedAt>20*36e5)).map(([id])=>id);
+  for(const id of due){try{await refreshShow(id,true)}catch(e){}}
+}
 async function refreshShow(id,quiet){
   const it=S.items.get(id);if(!it||it.kind!=="show"||!it.tmdb)return;
   if(!quiet){S.refreshing=true;render()}
@@ -163,7 +171,11 @@ async function refreshShow(id,quiet){
     cur.seasons=merged.sort((a,b)=>a.n-b.n);cur.status=d.status||cur.status;cur.refreshedAt=Date.now();
     if(!cur.poster&&d.poster_path)cur.poster=d.poster_path;
     const added=allEps(cur).length-before;
-    autoShelf(cur,true);save(id,cur);
+    autoShelf(cur,true);
+    // only write when TMDB actually changed something (new episodes, air dates, titles, status, shelf)
+    const sig=x=>JSON.stringify([x.seasons,x.status,x.shelf,x.poster]);
+    if(sig(cur)!==sig(it))save(id,cur);
+    else{const live=S.items.get(id);if(live)live.refreshedAt=cur.refreshedAt}
     if(!quiet)toast(added>0?"Added "+added+" new episode"+(added>1?"s":"")+".":"Episode list is up to date.");
   }catch(e){if(!quiet)toast("Couldn't reach TMDB. Try again in a bit.")}
   finally{if(!quiet){S.refreshing=false;render()}}
@@ -186,6 +198,7 @@ async function loadAll(){
     for(const[id,v]of pending)if(!m.has(id))m.set(id,v);
     S.items=m;S.loaded=true;S.offline=false;writeCache();render();
     migrateConfidence();
+    checkCaughtUp();
   }catch(e){
     S.loaded=true;S.offline=true;render();
     if(e&&/relation|does not exist|schema cache/i.test(e.message||""))toast("The diary table isn't set up in Supabase yet.");
@@ -394,13 +407,19 @@ function showsBody(){
     return'<div class="empty"><p>'+msg+'</p><button class="btn ghost" type="button" data-a="openAdd">'+ICON.plus+'Add a show</button></div>';
   }
   if(S.showShelf==="watching"&&!q){
-    return'<div class="rows">'+items.map(([id,it])=>{
+    // Two automatic sections: shows with an aired episode waiting, and shows you're caught up on.
+    // A show moves between them by itself as you watch and as new episodes air.
+    const row=([id,it])=>{
       const p=progress(it),n=nextUp(it),na=nextAiring(it);
-      const nextLine=n?'<span class="next"><b>'+code(n.s,n.e.n)+'</b>'+esc(n.e.t||"Episode "+n.e.n)+'</span>':'<span class="next caught">Caught up'+(na?' · next airs '+esc(fmtDate(na.e.a)):"")+'</span>';
-      return'<div class="row"><button class="open" type="button" data-a="open" data-id="'+id+'">'+cover(it,"","w185")+'<span class="info"><span class="title">'+esc(it.title)+'</span>'+nextLine+
+      const nextLine=n?'<span class="next"><b>'+code(n.s,n.e.n)+'</b>'+esc(n.e.t||"Episode "+n.e.n)+'</span>':'<span class="next caught">'+(na?"Next episode airs "+esc(fmtDate(na.e.a)):"No new episodes announced yet")+'</span>';
+      return'<div class="row'+(n?"":" row-caught")+'"><button class="open" type="button" data-a="open" data-id="'+id+'">'+cover(it,"","w185")+'<span class="info"><span class="title">'+esc(it.title)+'</span>'+nextLine+
         '<span class="bar"><span style="width:'+(p.total?Math.round(p.w/p.total*100):0)+'%"></span></span><span class="pct">'+p.w+' of '+p.total+' watched</span></span></button>'+
         (n?'<button class="check-big" type="button" data-a="watchNext" data-id="'+id+'" aria-label="Mark '+code(n.s,n.e.n)+' watched">'+ICON.check+'</button>':'<span></span>')+'</div>';
-    }).join("")+'</div>';
+    };
+    const upNext=items.filter(([,it])=>nextUp(it));
+    const caught=items.filter(([,it])=>!nextUp(it)).sort((a,b)=>{const x=nextAiring(a[1]),y=nextAiring(b[1]);return(x?x.e.a:"9999").localeCompare(y?y.e.a:"9999")});
+    const sec=(t,list,empty)=>'<section class="watch-sec"><h2 class="sec-head">'+t+' <span>'+list.length+'</span></h2>'+(list.length?'<div class="rows">'+list.map(row).join("")+'</div>':'<p class="hint">'+empty+'</p>')+'</section>';
+    return sec("Up next",upNext,"You're caught up on everything you're watching.")+(caught.length?sec("Caught up",caught,""):"");
   }
   return'<p class="result-count">'+items.length+' show'+(items.length===1?"":"s")+'</p><div class="grid">'+items.map(([id,it])=>{const p=progress(it);const note=tileNote("show",it);
     return'<button class="tile" type="button" data-a="open" data-id="'+id+'">'+cover(it)+'<span class="t">'+esc(it.title)+'</span><span class="m">'+(scoreOf(it)?scorePill(it)+" ":"")+(note?esc(note):p.w+'/'+p.total+' eps')+'</span></button>'}).join("")+'</div>';

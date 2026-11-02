@@ -407,3 +407,11 @@ textarea{width:100%;box-sizing:border-box;min-height:96px;border:1px solid var(-
 @media (max-width:420px){.ctl{flex:1 1 calc(50% - 6px);max-width:none}}
 .fix-list{list-style:none;margin:0;padding:0;display:flex;flex-wrap:wrap;gap:6px;flex:1 1 100%}
 .fix-list .chip{font-size:13px;padding:6px 10px;white-space:normal;text-align:left}
+
+/* Watching: Up next / Caught up */
+.watch-sec{margin-bottom:22px}
+.sec-head{display:flex;align-items:baseline;gap:8px;font:780 19px/1.1 var(--f-display);letter-spacing:-.01em;margin:4px 0 10px}
+.sec-head span{font:500 12px var(--f-mono);color:var(--faint)}
+.row-caught{background:var(--bg);border-style:dashed}
+.row-caught .cover{opacity:.85}
+.row-caught .next.caught{color:var(--s-completed);font-weight:600}
