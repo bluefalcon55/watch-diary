@@ -55,7 +55,9 @@ function lovedOf(it){return scoreOf(it)>=9}
 function scorePill(it){const s=scoreOf(it);return s?'<span class="score">'+s+'<small>/10</small></span>':""}
 function confBadge(c){return c==="probable"?'<span class="conf conf-probable">Probable</span>':c==="guess"?'<span class="conf conf-guess">Guess</span>':""}
 function watchesOf(it){return(it.watches||[]).filter(w=>w&&typeof w==="object")}
-function allEps(it){const out=[];(it.seasons||[]).slice().sort((a,b)=>a.n-b.n).forEach(s=>(s.eps||[]).slice().sort((a,b)=>a.n-b.n).forEach(e=>out.push({s:s.n,e})));return out}
+function snum(n){return n===0?9999:n}
+function sname(n){return n===0?"Specials":"Season "+n}
+function allEps(it){const out=[];(it.seasons||[]).slice().sort((a,b)=>snum(a.n)-snum(b.n)).forEach(s=>(s.eps||[]).slice().sort((a,b)=>a.n-b.n).forEach(e=>out.push({s:s.n,e})));return out}
 function airedEps(it){return allEps(it).filter(x=>aired(x.e))}
 function progress(it){const a=airedEps(it);return{w:a.filter(x=>isW(x.e)).length,total:a.length}}
 function nextUp(it){const a=airedEps(it);let last=-1;a.forEach((x,i)=>{if(isW(x.e))last=i});for(let i=last+1;i<a.length;i++)if(!isW(a[i].e))return a[i];for(let i=0;i<a.length;i++)if(!isW(a[i].e))return a[i];return null}
@@ -139,7 +141,7 @@ async function refreshShow(id,quiet){
     const cur=clone(id);const old=cur.seasons||[];
     const before=allEps(cur).length;
     const merged=fresh.map(ns=>{const os=old.find(s=>s.n===ns.n);
-      const eps=ns.eps.map(ne=>{const oe=os&&os.eps.find(e=>e.n===ne.n);return Object.assign({},ne,{w:oe&&oe.w!==undefined?oe.w:null},oe&&oe.c?{c:oe.c}:{},oe&&oe.s!=null?{s:oe.s}:{})});
+      const eps=ns.eps.map(ne=>{const oe=os&&os.eps.find(e=>e.n===ne.n);return Object.assign({},ne,{w:oe&&oe.w!==undefined?oe.w:null},oe&&oe.c?{c:oe.c}:{},oe&&oe.s!=null?{s:oe.s}:{},oe&&oe.rw?{rw:oe.rw}:{})});
       (os?os.eps:[]).forEach(oe=>{if(!eps.some(e=>e.n===oe.n))eps.push(oe)});
       return{n:ns.n,eps:eps.sort((a,b)=>a.n-b.n)}});
     old.forEach(os=>{if(!merged.some(s=>s.n===os.n))merged.push(os)});
@@ -334,7 +336,8 @@ function moviesView(){
 function diaryEntries(){
   const out=[];
   for(const[id,it]of S.items){
-    if(it.kind==="show")(it.seasons||[]).forEach(s=>(s.eps||[]).forEach(e=>{if(e.w)out.push({date:e.w,c:e.c||"confirmed",id,kind:"show",s:s.n,e:e.n,t:e.t})}));
+    if(it.kind==="show")(it.seasons||[]).forEach(s=>(s.eps||[]).forEach(e=>{if(e.w)out.push({date:e.w,c:e.c||"confirmed",id,kind:"show",s:s.n,e:e.n,t:e.t});
+      (e.rw||[]).forEach(r=>{if(r&&r.d)out.push({date:r.d,c:r.c||"confirmed",id,kind:"show",s:s.n,e:e.n,t:e.t,re:true})})}));
     else watchesOf(it).forEach((w,i)=>{if(w.d)out.push({date:w.d,c:w.c||"confirmed",id,kind:"movie",wi:i,re:isRewatch(it,w)})});
   }
   return out;
@@ -368,7 +371,7 @@ function diaryView(){
       if(g.kind==="movie"){const re=g.re;
         meta=scorePill(it)+(lovedOf(it)?'<span class="dheart" aria-label="Loved">♥</span>':"")+(re?'<span class="drewatch" title="Rewatch" aria-label="Rewatch">'+ICON.rewatch+'</span>':"")+confBadge(g.c)+(!scoreOf(it)&&!re&&g.c==="confirmed"?'<span class="dsub">Film</span>':"");}
       else{const e=g.eps.sort((a,b)=>a.s-b.s||a.e-b.e);
-        meta=(e.length===1?'<span class="dsub"><b class="mono">'+code(e[0].s,e[0].e)+'</b> '+esc(e[0].t||"")+'</span>':'<span class="dsub"><b class="mono">'+code(e[0].s,e[0].e)+'–'+(e[0].s===e[e.length-1].s?"E"+pad(e[e.length-1].e):code(e[e.length-1].s,e[e.length-1].e))+'</b> '+e.length+' episodes</span>')+confBadge(g.c);}
+        meta=(e.length===1?'<span class="dsub"><b class="mono">'+code(e[0].s,e[0].e)+'</b> '+esc(e[0].t||"")+'</span>':'<span class="dsub"><b class="mono">'+code(e[0].s,e[0].e)+'–'+(e[0].s===e[e.length-1].s?"E"+pad(e[e.length-1].e):code(e[e.length-1].s,e[e.length-1].e))+'</b> '+e.length+' episodes</span>')+(g.re?'<span class="drewatch" title="Rewatch" aria-label="Rewatch">'+ICON.rewatch+'</span>':"")+confBadge(g.c);}
       const show=g.date!==prev;prev=g.date;
       h+='<li>'+diaryRow(it,g.id,show?String(+g.date.slice(8)):"",(show?"":"same")+(g.c!=="confirmed"?" unsure":""),meta)+'</li>';
     });
@@ -421,7 +424,7 @@ function dangerZone(it){
 }
 function showDetail(id,it,enter){
   const p=progress(it),n=nextUp(it),na=nextAiring(it);
-  const seasons=(it.seasons||[]).slice().sort((a,b)=>a.n-b.n);
+  const seasons=(it.seasons||[]).slice().sort((a,b)=>snum(a.n)-snum(b.n));
   if(S.season==null||!seasons.some(s=>s.n===S.season))S.season=n?n.s:(seasons[0]?seasons[0].n:null);
   const cs=seasons.find(s=>s.n===S.season);
   let b=matchBanner(it)+heroBlock(it,[it.year?'<span class="mono">'+esc(it.year)+'</span>':"",esc(it.by),esc(it.genre),it.status?esc(it.status):""].filter(Boolean).join(" · "))+extraFacts(it);
@@ -429,14 +432,14 @@ function showDetail(id,it,enter){
   b+='<div class="progress"><div class="top"><span><b>'+p.w+'</b> of '+p.total+' aired episodes</span><span class="mono">'+(p.total?Math.round(p.w/p.total*100):0)+'%</span></div><div class="bar"><span style="width:'+(p.total?p.w/p.total*100:0)+'%"></span></div></div>';
   if(n)b+='<div class="card nextup"><div><p class="label" style="margin-bottom:4px">Next up</p><div class="code">'+code(n.s,n.e.n)+'</div><div class="ep">'+esc(n.e.t||"Episode "+n.e.n)+'</div></div><button class="btn primary" type="button" data-a="toggleEp" data-s="'+n.s+'" data-e="'+n.e.n+'">Watched</button></div>';
   else if(p.total)b+='<div class="card nextup"><div><p class="label" style="margin-bottom:4px">All caught up</p><div class="ep">'+(na?"Next episode airs "+esc(fmtDate(na.e.a)):ended(it)?"You've seen every episode.":"No new episodes announced yet.")+'</div></div></div>';
-  if(seasons.length)b+='<div class="seasons" data-scroll="seasons">'+seasons.map(s=>{const ae=s.eps.filter(aired);const w=ae.filter(isW).length;return'<button class="spill'+(ae.length&&w===ae.length?" done":"")+'" type="button" data-a="season" data-v="'+s.n+'" aria-pressed="'+(s.n===S.season)+'"><b>Season '+s.n+'</b><span>'+w+'/'+ae.length+(ae.length<s.eps.length?" +"+(s.eps.length-ae.length):"")+'</span></button>'}).join("")+'</div>';
+  if(seasons.length)b+='<div class="seasons" data-scroll="seasons">'+seasons.map(s=>{const ae=s.eps.filter(aired);const w=ae.filter(isW).length;return'<button class="spill'+(ae.length&&w===ae.length?" done":"")+'" type="button" data-a="season" data-v="'+s.n+'" aria-pressed="'+(s.n===S.season)+'"><b>'+sname(s.n)+'</b><span>'+w+'/'+ae.length+(ae.length<s.eps.length?" +"+(s.eps.length-ae.length):"")+'</span></button>'}).join("")+'</div>';
   if(cs){
     const ae=cs.eps.filter(aired);const w=ae.filter(isW).length,all=ae.length>0&&w===ae.length;
-    b+='<div class="season-head"><h3>Season '+cs.n+'</h3>'+(all?'<button class="link" type="button" data-a="unmarkSeason">Unmark season</button>':ae.length?'<button class="link" type="button" data-a="markAsk">Mark season watched</button>':"")+'</div>';
+    b+='<div class="season-head"><h3>'+sname(cs.n)+'</h3>'+(all?'<button class="link" type="button" data-a="unmarkSeason">Unmark season</button>':ae.length?'<button class="link" type="button" data-a="markAsk">Mark season watched</button>':"")+'</div>';
     if(S.markAsk===cs.n)b+='<div class="choice"><span>When did you watch it?</span><button class="btn primary" type="button" data-a="markSeason" data-v="today">Today</button><button class="btn ghost" type="button" data-a="markSeason" data-v="nodate">Before, no date</button></div>';
     b+='<ul class="eps">'+cs.eps.slice().sort((a,b)=>a.n-b.n).map(e=>{const wd=isW(e),fut=!aired(e);
       return'<li class="ep'+(wd?" w":"")+(fut?" future":"")+'"><button class="tick" type="button" data-a="toggleEp" data-s="'+cs.n+'" data-e="'+e.n+'" aria-pressed="'+wd+'" aria-label="'+(wd?"Unmark ":"Mark ")+code(cs.n,e.n)+'" '+(fut?"disabled":"")+'>'+ICON.check+'</button>'+
-        '<span class="et"><span class="code">E'+pad(e.n)+(e.a&&!fut?" · "+esc(fmtDate(e.a)):"")+'</span><span class="name">'+esc(e.t||"Episode "+e.n)+'</span></span>'+
+        '<span class="et"><span class="code">E'+pad(e.n)+(e.a&&!fut?" · "+esc(fmtDate(e.a)):"")+'</span><span class="name">'+esc(e.t||"Episode "+e.n)+'</span>'+((e.s||(e.rw&&e.rw.length))?'<span class="epx">'+(e.s?e.s+'/10':"")+(e.s&&e.rw&&e.rw.length?" · ":"")+(e.rw&&e.rw.length?"rewatched "+e.rw.map(r=>fmtDate(r.d)).join(", "):"")+'</span>':"")+'</span>'+
         (fut?'<span class="airs">Airs '+esc(fmtDate(e.a))+'</span>':wd?'<label class="when"><span>'+(e.w?esc(fmtDate(e.w)):"Seen")+'</span><input type="date" aria-label="Date watched for '+code(cs.n,e.n)+'" data-c="epDate" data-s="'+cs.n+'" data-e="'+e.n+'" value="'+esc(e.w||"")+'" max="'+today()+'"></label>':"<span></span>")+'</li>'}).join("")+'</ul>';
   }else b+='<div class="card"><p style="margin:0;color:var(--muted)">No episodes listed yet.</p></div>';
   b+='<div class="tools"><button class="btn ghost" type="button" data-a="refreshShow" '+(S.refreshing?"disabled":"")+'>'+(S.refreshing?'<span class="spin"></span>Checking…':"Check for new episodes")+'</button><button class="btn ghost" type="button" data-a="openPicker">Change cover</button></div>';
@@ -451,7 +454,6 @@ function extraFacts(it){
   if(it.theater)f.push("Seen in a theater"+(typeof it.theater==="string"?" ("+esc(it.theater)+")":""));
   if(it.listNote)f.push("Your list note: “"+esc(it.listNote)+"”");
   if(it.avgEpRating)f.push("Average episode rating "+esc(it.avgEpRating)+"/10");
-  if(it.kind==="show"&&it.first&&(it.first.lo||it.first.hi))f.push("Watched between "+esc(windowText(it.first.lo,it.first.hi)));
   return f.length?'<ul class="facts">'+f.map(x=>"<li>"+x+"</li>").join("")+'</ul>':"";
 }
 function movieDetail(id,it,enter){
@@ -654,10 +656,11 @@ function applyEpisodes(doc,eps){
     if(x.w!=null&&(ep.w==null||(ep.w===""&&x.w)))ep.w=x.w;
     if(x.c&&!ep.c)ep.c=x.c;
     const sc=x.s_!=null?x.s_:x.r;if(sc!=null&&ep.s==null)ep.s=sc;
+    if(x.rw&&x.rw.length){ep.rw=(ep.rw||[]).slice();x.rw.forEach(r=>{if(!ep.rw.some(y=>y.d===r.d))ep.rw.push(r)})}
   });
   doc.seasons.sort((a,b)=>a.n-b.n);doc.seasons.forEach(s=>s.eps.sort((a,b)=>a.n-b.n));
 }
-function watchedEps(doc){const out=[];(doc.seasons||[]).forEach(s=>s.eps.forEach(e=>{if(e.w!=null)out.push({s:s.n,e:e.n,w:e.w,c:e.c,s_:e.s})}));return out}
+function watchedEps(doc){const out=[];(doc.seasons||[]).forEach(s=>s.eps.forEach(e=>{if(e.w!=null)out.push({s:s.n,e:e.n,w:e.w,c:e.c,s_:e.s,rw:e.rw})}));return out}
 /* existing = what's already in the diary (wins on anything Jonah set by hand) */
 function mergeDocs(existing,incoming){
   const m=Object.assign({},incoming);
