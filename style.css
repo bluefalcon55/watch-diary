@@ -375,3 +375,22 @@ textarea{width:100%;box-sizing:border-box;min-height:96px;border:1px solid var(-
 .watches .wd{font-family:var(--f-body);font-size:14px}
 .danger-zone{gap:18px}
 .ep .epx{font:500 11px var(--f-mono);color:var(--faint);white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+
+/* diary: films vs TV */
+.dlist{padding:0}
+.dlist li{padding:0 var(--gr) 0 var(--gl)}
+.dlist li.row-tv{background:#EEF2FF}
+.dlist li.row-tv + li.row-tv .dinfo{border-top-color:#DCE3FB}
+.kind-tag{display:inline-flex;align-items:center;gap:3px;font:600 9.5px/1 var(--f-mono);letter-spacing:.08em;text-transform:uppercase;border-radius:5px;padding:3px 5px 3px 4px;flex:none}
+.kind-tag svg{width:11px;height:11px}
+.kind-tag.film{color:#6B4E16;background:#FBEFD5}
+.kind-tag.tv{color:#fff;background:var(--accent)}
+.dcover{position:relative;display:block}
+.row-tv .dcover .cover{border-radius:4px;box-shadow:0 0 0 2px var(--accent),0 1px 3px rgba(22,26,51,.2)}
+.row-tv .dsub b{color:var(--accent)}
+
+/* repair banner */
+.fix-banner{display:flex;flex-wrap:wrap;align-items:center;justify-content:space-between;gap:10px 14px;background:var(--surface);border:1px solid var(--line);border-radius:14px;padding:12px 14px;margin:6px 0 16px;font-size:14px}
+.fix-banner.warn{background:#FFF6E0;border-color:#F1DDA6}
+.fix-banner > div:first-child{flex:1 1 240px;min-width:0}
+.fix-banner .bar{flex:1 1 100%}

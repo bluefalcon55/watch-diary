@@ -100,13 +100,28 @@ document.addEventListener("error",e=>{const t=e.target;if(t&&t.tagName==="IMG"){
 
 /* ---------- TMDB ---------- */
 const tmdbCache=new Map();
+/* TMDB refuses bursts (429 + dropped connections), so every request is spaced out
+   and retried with backoff. A request that still fails throws: callers must treat
+   that as "try again later", never as "no match". */
+let tmdbGate=Promise.resolve();
+function tmdbSlot(){const p=tmdbGate.then(()=>new Promise(r=>setTimeout(r,55)));tmdbGate=p;return p}
+class NotFound extends Error{}
 async function tmdb(path,params){
   const u=new URL("https://api.themoviedb.org/3"+path);
   Object.entries(params||{}).forEach(([k,v])=>u.searchParams.set(k,v));
   const key=u.toString();if(tmdbCache.has(key))return tmdbCache.get(key);
-  const r=await fetch(key,{headers:{Authorization:"Bearer "+CFG.tmdb,accept:"application/json"}});
-  if(!r.ok)throw new Error("TMDB "+r.status);
-  const j=await r.json();tmdbCache.set(key,j);return j;
+  let last="";
+  for(let a=0;a<7;a++){
+    await tmdbSlot();
+    let r;
+    try{r=await fetch(key,{headers:{Authorization:"Bearer "+CFG.tmdb,accept:"application/json"}})}catch(e){r=null;last="connection"}
+    if(r&&r.ok){const j=await r.json();tmdbCache.set(key,j);return j}
+    if(r&&r.status===404)throw new NotFound("TMDB 404");
+    if(r&&r.status!==429&&r.status<500)throw new Error("TMDB "+r.status);
+    if(r)last=String(r.status);
+    await new Promise(res=>setTimeout(res,Math.min(16000,800*Math.pow(2,a))+Math.random()*400));
+  }
+  throw new Error("TMDB unavailable ("+last+")");
 }
 async function pool(items,n,fn){const out=new Array(items.length);let i=0;await Promise.all(Array.from({length:Math.min(n,items.length)},async()=>{while(i<items.length){const k=i++;out[k]=await fn(items[k])}}));return out}
 async function fetchShowSeasons(tmdbId,seasonsMeta){
@@ -170,6 +185,7 @@ async function loadAll(){
     const m=new Map();rows.forEach(r=>m.set(r.id,pending.has(r.id)?pending.get(r.id):r.data));
     for(const[id,v]of pending)if(!m.has(id))m.set(id,v);
     S.items=m;S.loaded=true;S.offline=false;writeCache();render();
+    migrateConfidence();
   }catch(e){
     S.loaded=true;S.offline=true;render();
     if(e&&/relation|does not exist|schema cache/i.test(e.message||""))toast("The diary table isn't set up in Supabase yet.");
@@ -348,7 +364,10 @@ function undatedEntries(){
   return out.sort((a,b)=>(b.hi||"9999").localeCompare(a.hi||"9999")||b.o-a.o);
 }
 function diaryRow(it,id,box,boxCls,meta){
-  return'<button type="button" class="drow" data-a="open" data-id="'+id+'"><span class="dbox '+boxCls+'">'+box+'</span>'+cover(it,"","w154")+'<span class="dinfo"><span class="dtitle">'+esc(it.title)+(it.year?' <span class="dyear">'+esc(it.year)+'</span>':"")+'</span><span class="dmeta">'+meta+'</span></span></button>';
+  const tv=it.kind==="show";
+  const tag=tv?'<span class="kind-tag tv">'+ICON.tv+'TV</span>':'<span class="kind-tag film">'+ICON.film+'Film</span>';
+  return'<li class="'+(tv?"row-tv":"row-film")+'"><button type="button" class="drow" data-a="open" data-id="'+id+'"><span class="dbox '+boxCls+'">'+box+'</span>'+
+    '<span class="dcover">'+cover(it,"","w154")+'</span><span class="dinfo"><span class="dtitle">'+esc(it.title)+(it.year&&!tv?' <span class="dyear">'+esc(it.year)+'</span>':"")+'</span><span class="dmeta">'+tag+meta+'</span></span></button></li>';
 }
 function diaryView(){
   const und=undatedEntries();
@@ -373,7 +392,7 @@ function diaryView(){
       else{const e=g.eps.sort((a,b)=>a.s-b.s||a.e-b.e);
         meta=(e.length===1?'<span class="dsub"><b class="mono">'+code(e[0].s,e[0].e)+'</b> '+esc(e[0].t||"")+'</span>':'<span class="dsub"><b class="mono">'+code(e[0].s,e[0].e)+'–'+(e[0].s===e[e.length-1].s?"E"+pad(e[e.length-1].e):code(e[e.length-1].s,e[e.length-1].e))+'</b> '+e.length+' episodes</span>')+(g.re?'<span class="drewatch" title="Rewatch" aria-label="Rewatch">'+ICON.rewatch+'</span>':"")+confBadge(g.c);}
       const show=g.date!==prev;prev=g.date;
-      h+='<li>'+diaryRow(it,g.id,show?String(+g.date.slice(8)):"",(show?"":"same")+(g.c!=="confirmed"?" unsure":""),meta)+'</li>';
+      h+=diaryRow(it,g.id,show?String(+g.date.slice(8)):"",(show?"":"same")+(g.c!=="confirmed"?" unsure":""),meta);
     });
     h+='</ul></section>';
   }
@@ -391,7 +410,7 @@ function undatedView(und){
     const yr=x.hi?x.hi.slice(0,4):"Newly added";
     if(yr!==curYear){if(curYear!==null)h+='</ul></section>';curYear=yr;h+='<section class="dmonth"><h2 class="dmonth-head">'+(x.hi?"Seen by "+yr:yr)+'</h2><ul class="dlist">'}
     const meta=scorePill(it)+(lovedOf(it)?'<span class="dheart" aria-label="Loved">♥</span>':"")+'<span class="dsub">'+esc(x.lo||x.hi?windowText(x.lo,x.hi):"Date unknown")+'</span>'+confBadge(x.c);
-    h+='<li>'+diaryRow(it,x.id,"",(x.c!=="confirmed"?"unsure ":"")+"undated",meta)+'</li>';
+    h+=diaryRow(it,x.id,"",(x.c!=="confirmed"?"unsure ":"")+"undated",meta);
   });
   return h+'</ul></section>';
 }
@@ -556,7 +575,7 @@ function render(){
   let main;
   if(!S.loaded)main=loading();
   else if(!S.items.size)main=firstRun();
-  else main=S.tab==="shows"?showsView():S.tab==="movies"?moviesView():diaryView();
+  else main=fixBanner()+(S.tab==="shows"?showsView():S.tab==="movies"?moviesView():diaryView());
   app.innerHTML=topbar()+'<main class="wrap">'+main+'</main>'+tabbar();
   if(libFocused){const i=document.getElementById("libq");if(i){i.focus();const v=i.value;i.setSelectionRange(v.length,v.length)}}
   let key="",html="";
@@ -686,12 +705,12 @@ function settleShowShelf(doc){
 /* ---------- import ---------- */
 async function resolveTmdb(rec){
   if(rec.kind==="movie"&&rec.imdb){
-    try{const f=await tmdb("/find/"+rec.imdb,{external_source:"imdb_id"});
-      if(f.movie_results&&f.movie_results[0])return{kind:"movie",id:f.movie_results[0].id};}catch(e){}
+    const f=await tmdb("/find/"+rec.imdb,{external_source:"imdb_id"});
+    if(f.movie_results&&f.movie_results[0])return{kind:"movie",id:f.movie_results[0].id};
   }
   const title=rec.title,year=rec.year;
   const path=rec.kind==="movie"?"/search/movie":"/search/tv";
-  const tryQ=async params=>{try{return(await tmdb(path,Object.assign({query:title,include_adult:"false"},params))).results||[]}catch(e){return[]}};
+  const tryQ=async params=>(await tmdb(path,Object.assign({query:title,include_adult:"false"},params))).results||[];
   let res=await tryQ(year?(rec.kind==="movie"?{year:String(year)}:{first_air_date_year:String(year)}):{});
   if(!res.length&&year)res=await tryQ({});
   const want=sqz(title);
@@ -709,15 +728,13 @@ function importedDoc(rec){
   return d;
 }
 async function buildImported(rec){
-  const hit=await resolveTmdb(rec);
+  const hit=await resolveTmdb(rec);  // throws if TMDB can't be reached: the record is retried on the next run
   let doc,id;
   if(hit){
-    try{
-      const base=await buildFromTmdb(hit.kind,hit.id);
-      id=hit.kind+"-"+hit.id;
-      doc=Object.assign(base,pickFields(importedDoc(rec),hit.kind==="movie"?MOVIE_USER_FIELDS:SHOW_USER_FIELDS));
-      if(!doc.score)doc.score=0;
-    }catch(e){doc=null}
+    const base=await buildFromTmdb(hit.kind,hit.id);
+    id=hit.kind+"-"+hit.id;
+    doc=Object.assign(base,pickFields(importedDoc(rec),hit.kind==="movie"?MOVIE_USER_FIELDS:SHOW_USER_FIELDS));
+    if(!doc.score)doc.score=0;
   }
   if(!doc){
     id=(rec.kind==="movie"?"movie":"show")+"-x-"+rec.key.replace(/[^A-Za-z0-9_-]+/g,"-").slice(0,80);
@@ -742,8 +759,10 @@ async function readImportFile(file){
 async function runImport(){
   const I=S.imp;if(!I||!I.data)return;
   const recs=I.data.records.filter(r=>!I.skipShows||r.kind!=="show");
-  const have=new Map();for(const[id,it]of S.items)if(it.imp&&it.imp.key)have.set(it.imp.key,id);
+  const have=new Map();for(const[id,it]of S.items)if(it.imp&&it.imp.key&&!it.needsMatch)have.set(it.imp.key,id);
   const todo=recs.filter(r=>!have.has(r.key));
+  const flagged=new Map();for(const[id,it]of S.items)if(it.needsMatch&&it.imp&&it.imp.key)flagged.set(it.imp.key,id);
+  const dels=[];
   Object.assign(I,{phase:"running",total:recs.length,done:recs.length-todo.length,already:recs.length-todo.length,matched:0,unmatched:[],failed:0});
   renderSoon();
   const built=new Map();let buffer=[];
@@ -755,8 +774,11 @@ async function runImport(){
       if(I.cancel)return;
       let r;try{r=await buildImported(rec)}catch(e){I.failed++;I.done++;renderSoon();return}
       let doc=r.doc;
+      const oldId=flagged.get(rec.key);
+      if(oldId&&oldId!==r.id&&!doc.needsMatch){const old=S.items.get(oldId);if(old)doc=mergeDocs(old,doc);dels.push(oldId)}
       const prior=built.get(r.id)||S.items.get(r.id);
       if(prior)doc=mergeDocs(prior,doc);
+      correctConfidence(doc);
       doc.updatedAt=Date.now();built.set(r.id,doc);
       buffer=buffer.filter(x=>x.id!==r.id);buffer.push({id:r.id,doc});
       if(doc.needsMatch)I.unmatched.push(r.id);else I.matched++;
@@ -764,11 +786,95 @@ async function runImport(){
       if(buffer.length>=40)await flushBuf();
     });
     await flushBuf();
+    if(dels.length){await deleteRows(dels);dels.forEach(id=>{if(!built.has(id))S.items.delete(id)});scheduleCache()}
     I.phase=I.cancel?"stopped":"done";
   }catch(e){I.phase="error";I.err="Saving stopped partway: "+((e&&e.message)||"connection problem")+". Run the import again and it will pick up where it left off."}
   render();
 }
 let renderTimer=null;function renderSoon(){if(renderTimer)return;renderTimer=setTimeout(()=>{renderTimer=null;render()},250)}
+
+/* ---------- confidence correction (v1) ----------
+   Viewings logged live in TV Time or Letterboxd, and anything from 2021 on, are accurate.
+   Episode dates that survived the bulk-marking filter are per-episode logs: accurate too. */
+const CONF_V=1;
+function correctConfidence(doc){
+  if((doc.confV||0)>=CONF_V)return false;
+  let ch=false;
+  if(doc.kind==="movie")(doc.watches||[]).forEach(w=>{if(w.d&&w.c!=="confirmed"&&(/TV Time|Letterboxd/.test(w.via||"")||w.d>="2021")){w.c="confirmed";ch=true}});
+  else(doc.seasons||[]).forEach(s=>s.eps.forEach(e=>{
+    if(e.w&&e.c&&e.c!=="confirmed"){e.c="confirmed";ch=true}
+    (e.rw||[]).forEach(r=>{if(r.d&&r.c!=="confirmed"){r.c="confirmed";ch=true}});
+  }));
+  doc.confV=CONF_V;
+  return true;
+}
+function cleanTitle(t){return String(t||"").replace(/\s*\((\d{4}|[A-Z]{2})\)\s*$/,"")}
+function recFromDoc(d){
+  const key=(d.imp&&d.imp.key)||"";const m=String(d.title||"").match(/\((\d{4}|[A-Z]{2})\)\s*$/);
+  return{kind:d.kind,key,imdb:/^m:tt\d+$/.test(key)?key.slice(2):null,title:cleanTitle(d.title),
+    year:d.year||(m&&/\d{4}/.test(m[1])?+m[1]:null),country:m&&!/\d/.test(m[1])?m[1]:null};
+}
+async function deleteRows(ids){
+  for(let i=0;i<ids.length;i+=100){const{error}=await sb.from("items").delete().in("id",ids.slice(i,i+100));if(error)throw error}
+}
+/* Re-match everything flagged "needs a match", from what's already saved. No file needed. */
+async function repairLibrary(){
+  if(S.fix&&S.fix.phase==="running")return;
+  const F=S.fix={phase:"running",total:0,done:0,matched:0,still:0,failed:0};
+  renderSoon();
+  try{
+    // 1) confidence correction on every title
+    const fixed=[];
+    for(const[id,d]of S.items){const c=JSON.parse(JSON.stringify(d));if(correctConfidence(c)){c.updatedAt=Date.now();fixed.push({id,doc:c})}}
+    if(fixed.length){await upsertRows(fixed.map(r=>({id:r.id,data:r.doc,updated_at:new Date().toISOString()})));fixed.forEach(r=>S.items.set(r.id,r.doc));scheduleCache()}
+    // 2) matching
+    const todo=[...S.items].filter(([,d])=>d.needsMatch);
+    F.total=todo.length;renderSoon();
+    let buf=[],dels=[];
+    const flush=async()=>{if(!buf.length&&!dels.length)return;const b=buf,dl=dels;buf=[];dels=[];
+      if(b.length)await upsertRows(b.map(r=>({id:r.id,data:r.doc,updated_at:new Date().toISOString()})));
+      if(dl.length)await deleteRows(dl);
+      b.forEach(r=>S.items.set(r.id,r.doc));dl.forEach(id=>{if(!b.some(r=>r.id===id))S.items.delete(id)});scheduleCache();renderSoon()};
+    await pool(todo,3,async([oldId,old])=>{
+      try{
+        const hit=await resolveTmdb(recFromDoc(old));
+        if(!hit){F.still++;F.done++;renderSoon();return}
+        const base=await buildFromTmdb(hit.kind,hit.id);
+        const newId=hit.kind+"-"+hit.id;
+        let doc=Object.assign(base,pickFields(old,old.kind==="movie"?MOVIE_USER_FIELDS:SHOW_USER_FIELDS));
+        if(old.kind==="show"){applyEpisodes(doc,watchedEps(old));settleShowShelf(doc)}
+        if(old.addedAt)doc.addedAt=old.addedAt;
+        const pendingNew=buf.find(r=>r.id===newId);
+        const target=pendingNew?pendingNew.doc:(newId!==oldId&&S.items.has(newId)?S.items.get(newId):null);
+        if(target)doc=mergeDocs(target,doc);
+        delete doc.needsMatch;correctConfidence(doc);doc.confV=CONF_V;doc.updatedAt=Date.now();
+        buf=buf.filter(r=>r.id!==newId);buf.push({id:newId,doc});if(newId!==oldId)dels.push(oldId);
+        F.matched++;
+      }catch(e){F.failed++}
+      F.done++;renderSoon();
+      if(buf.length>=30)await flush();
+    });
+    await flush();
+    F.phase="done";
+  }catch(e){F.phase="error";F.err=(e&&e.message)||"connection problem"}
+  render();
+}
+async function migrateConfidence(){
+  const fixed=[];
+  for(const[id,d]of S.items){if((d.confV||0)>=CONF_V)continue;const c=JSON.parse(JSON.stringify(d));if(correctConfidence(c)){c.updatedAt=Date.now();fixed.push({id,doc:c})}}
+  if(!fixed.length)return;
+  try{await upsertRows(fixed.map(r=>({id:r.id,data:r.doc,updated_at:new Date().toISOString()})));fixed.forEach(r=>S.items.set(r.id,r.doc));scheduleCache();render()}catch(e){}
+}
+function needsCount(){let n=0;for(const[,d]of S.items)if(d.needsMatch)n++;return n}
+function fixBanner(){
+  const F=S.fix;const n=needsCount();
+  if(F&&F.phase==="running")return'<div class="fix-banner"><div><b>Matching your titles…</b> '+F.done+' of '+F.total+'. Keep this page open.</div><div class="bar"><span style="width:'+(F.total?Math.round(F.done/F.total*100):0)+'%"></span></div></div>';
+  if(F&&F.phase!=="running"&&(F.matched||F.failed||F.err))return'<div class="fix-banner'+(F.failed||F.err?" warn":"")+'"><div><b>'+(F.err?"Matching stopped: "+esc(F.err):F.matched+" titles matched.")+'</b> '+
+    (F.still?F.still+" have no TMDB match, fix those by hand. ":"")+(F.failed?F.failed+" couldn't be reached. ":"")+'</div>'+
+    ((F.failed||F.err)&&n?'<button class="btn primary" type="button" data-a="repair">Try the rest again</button>':'<button class="btn ghost" type="button" data-a="dismissFix">OK</button>')+'</div>';
+  if(n)return'<div class="fix-banner warn"><div><b>'+n+' title'+(n>1?"s aren't":" isn't")+' matched to TMDB yet,</b> so '+(n>1?"they have":"it has")+' no poster. Your viewings are all there.</div><button class="btn primary" type="button" data-a="repair">Match them now</button></div>';
+  return"";
+}
 
 /* ---------- fix match ---------- */
 async function relinkTo(oldId,kind,tmdbId){
@@ -827,6 +933,8 @@ const A={
     it.shelf="watched";save(S.openId,it);toast(S.logNoDate?"Added to Undated":"Watch logged");S.logNoDate=false;S.logConf="confirmed";render()},
   removeWatch:d=>{const id=S.openId;const it=clone(id);const i=+d.v;const was=it.watches[i];if(!was)return;it.watches.splice(i,1);save(id,it);
     toast("Watch removed",{label:"Undo",fn:()=>{const c=clone(id);c.watches=watchesOf(c).concat(was);save(id,c)}})},
+  repair:()=>repairLibrary(),
+  dismissFix:()=>{S.fix=null;render()},
   openImport:()=>{S.imp=S.imp&&S.imp.phase==="running"?S.imp:{phase:"pick"};S.settings=true;render()},
   startImport:()=>{if(S.imp&&S.imp.data)runImport()},
   cancelImport:()=>{if(S.imp)S.imp.cancel=true},
