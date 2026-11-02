@@ -790,15 +790,21 @@ async function resolveTmdb(rec){
   const title=rec.title,year=rec.year;
   const path=rec.kind==="movie"?"/search/movie":"/search/tv";
   const tryQ=async params=>(await tmdb(path,Object.assign({query:title,include_adult:"false"},params))).results||[];
-  let res=await tryQ(year?(rec.kind==="movie"?{year:String(year)}:{first_air_date_year:String(year)}):{});
-  if(!res.length&&year)res=await tryQ({});
-  const want=sqz(title);
+  // titles in non-Latin scripts (となりのトトロ) have nothing left after norm(), so compare them raw
+  const tkey=s=>sqz(s)||String(s||"").toLowerCase().replace(/\s+/g,"");
+  const want=tkey(title);
   const yr=r=>parseInt(((rec.kind==="movie"?r.release_date:r.first_air_date)||"").slice(0,4),10);
-  const named=res.filter(r=>[r.title,r.name,r.original_title,r.original_name].some(n=>n&&sqz(n)===want));
-  let pick=named.filter(r=>!year||Math.abs(yr(r)-year)<=1);
-  if(rec.country)pick=pick.filter(r=>(r.origin_country||[]).includes(rec.country)).concat(pick);
-  if(!pick.length&&named.length===1&&!year)pick=named;
-  if(!pick.length)return null;
+  const exact=list=>list.filter(r=>[r.title,r.name,r.original_title,r.original_name].some(n=>n&&tkey(n)===want));
+  let named=year?exact(await tryQ(rec.kind==="movie"?{year:String(year)}:{first_air_date_year:String(year)})):[];
+  // the year on file can be a re-release or US-release year (Donnie Darko 2004, Eraserhead 1982):
+  // if nothing matches by name in that year, search every year
+  if(!named.length)named=exact(await tryQ({}));
+  if(!named.length)return null;
+  let pick=named.slice();
+  if(year)pick.sort((a,b)=>Math.abs((yr(a)||0)-year)-Math.abs((yr(b)||0)-year));
+  if(rec.country){const inC=pick.filter(r=>(r.origin_country||[]).includes(rec.country));if(inC.length)pick=inC}
+  // several same-named titles far from the year on file: too risky to guess
+  if(year&&pick.length>1&&Math.abs((yr(pick[0])||0)-year)>3)return null;
   return{kind:rec.kind,id:pick[0].id};
 }
 function importedDoc(rec){
@@ -974,11 +980,15 @@ function needsCount(){let n=0;for(const[,d]of S.items)if(d.needsMatch)n++;return
 function fixBanner(){
   const F=S.fix;const n=needsCount();
   if(F&&F.phase==="running")return'<div class="fix-banner"><div><b>Matching your titles…</b> '+F.done+' of '+F.total+'. Keep this page open.</div><div class="bar"><span style="width:'+(F.total?Math.round(F.done/F.total*100):0)+'%"></span></div></div>';
-  if(F&&F.phase!=="running"&&(F.matched||F.failed||F.err))return'<div class="fix-banner'+(F.failed||F.err?" warn":"")+'"><div><b>'+(F.err?"Matching stopped: "+esc(F.err):F.matched+" titles matched.")+'</b> '+
-    (F.still?F.still+" have no TMDB match, fix those by hand. ":"")+(F.failed?F.failed+" couldn't be reached. ":"")+'</div>'+
-    ((F.failed||F.err)&&n?'<button class="btn primary" type="button" data-a="repair">Try the rest again</button>':'<button class="btn ghost" type="button" data-a="dismissFix">OK</button>')+'</div>';
-  if(n)return'<div class="fix-banner warn"><div><b>'+n+' title'+(n>1?"s aren't":" isn't")+' matched to TMDB yet,</b> so '+(n>1?"they have":"it has")+' no poster. Your viewings are all there.</div><button class="btn primary" type="button" data-a="repair">Match them now</button></div>';
-  return"";
+  const tried=F&&F.phase!=="running";
+  const head=tried?(F.err?"Matching stopped: "+esc(F.err)+". ":(F.matched?F.matched+" matched. ":"")+(F.failed?F.failed+" couldn't reach TMDB. ":"")):"";
+  if(!n)return tried&&(F.matched||F.err)?'<div class="fix-banner"><div><b>'+head+'</b>Every title is matched.</div><button class="btn ghost" type="button" data-a="dismissFix">OK</button></div>':"";
+  const pending=[...S.items].filter(([,d])=>d.needsMatch).sort((a,b)=>String(a[1].title).localeCompare(String(b[1].title)));
+  const canRetry=!tried||F.failed||F.err;
+  return'<div class="fix-banner warn"><div>'+(head?"<b>"+head+"</b>":"")+'<b>'+n+' title'+(n>1?"s":"")+' still need'+(n>1?"":"s")+' a match.</b> '+
+    (canRetry?"Your viewings are all there.":"TMDB didn't have a clear match for "+(n>1?"these":"this one")+". Tap a title, then “Find the right title”.")+'</div>'+
+    (canRetry?'<button class="btn primary" type="button" data-a="repair">'+(tried?"Try again":"Match them now")+'</button>':"")+
+    '<ul class="fix-list">'+pending.map(([id,d])=>'<li><button class="chip" type="button" data-a="open" data-id="'+esc(id)+'">'+(d.kind==="show"?"TV · ":"")+esc(d.title)+(d.year?" ("+esc(d.year)+")":"")+'</button></li>').join("")+'</ul></div>';
 }
 
 /* ---------- fix match ---------- */

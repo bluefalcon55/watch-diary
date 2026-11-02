@@ -405,3 +405,5 @@ textarea{width:100%;box-sizing:border-box;min-height:96px;border:1px solid var(-
 .controls .link{align-self:center;font-size:13.5px;padding-top:14px}
 .result-count{font:500 11.5px var(--f-mono);color:var(--faint);margin:0 0 10px}
 @media (max-width:420px){.ctl{flex:1 1 calc(50% - 6px);max-width:none}}
+.fix-list{list-style:none;margin:0;padding:0;display:flex;flex-wrap:wrap;gap:6px;flex:1 1 100%}
+.fix-list .chip{font-size:13px;padding:6px 10px;white-space:normal;text-align:left}
