@@ -60,7 +60,9 @@ function sname(n){return n===0?"Specials":"Season "+n}
 function allEps(it){const out=[];(it.seasons||[]).slice().sort((a,b)=>snum(a.n)-snum(b.n)).forEach(s=>(s.eps||[]).slice().sort((a,b)=>a.n-b.n).forEach(e=>out.push({s:s.n,e})));return out}
 function airedEps(it){return allEps(it).filter(x=>aired(x.e))}
 function progress(it){const a=airedEps(it);return{w:a.filter(x=>isW(x.e)).length,total:a.length}}
-function nextUp(it){const a=airedEps(it);let last=-1;a.forEach((x,i)=>{if(isW(x.e))last=i});for(let i=last+1;i<a.length;i++)if(!isW(a[i].e))return a[i];for(let i=0;i<a.length;i++)if(!isW(a[i].e))return a[i];return null}
+/* Next episode = the first aired, unwatched one after the last episode you watched.
+   Skipped older episodes (e.g. early seasons of Alone) don't count against being caught up. */
+function nextUp(it){const a=airedEps(it);let last=-1;a.forEach((x,i)=>{if(isW(x.e))last=i});for(let i=last+1;i<a.length;i++)if(!isW(a[i].e))return a[i];return null}
 function nextAiring(it){const f=allEps(it).filter(x=>!aired(x.e)&&x.e.a).sort((a,b)=>a.e.a.localeCompare(b.e.a));return f[0]||null}
 function ended(it){return it.status==="Ended"||it.status==="Canceled"}
 function findEp(it,s,e){const se=(it.seasons||[]).find(x=>x.n===s);return se&&se.eps.find(x=>x.n===e)}
