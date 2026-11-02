@@ -35,8 +35,8 @@ const S={user:null,authReady:false,authMode:"signin",authMsg:"",authErr:"",items
   tab:"shows",showShelf:"watching",movieShelf:"watched",q:"",openId:null,season:null,diaryYear:new Date().getFullYear(),
   diaryFilter:"all",diaryView:"dated",add:null,picker:null,settings:false,confirm:null,markAsk:null,refreshing:false,
   logNoDate:false,logConf:"confirmed",renderPending:false,lastSheet:"",offline:false};
-try{const p=JSON.parse(localStorage.getItem("wd-prefs")||"{}");["tab","showShelf","movieShelf","diaryView"].forEach(k=>{if(p[k])S[k]=p[k]})}catch(e){}
-function savePrefs(){try{localStorage.setItem("wd-prefs",JSON.stringify({tab:S.tab,showShelf:S.showShelf,movieShelf:S.movieShelf,diaryView:S.diaryView}))}catch(e){}}
+try{const p=JSON.parse(localStorage.getItem("wd-prefs")||"{}");["tab","showShelf","movieShelf","diaryView","sortBy"].forEach(k=>{if(p[k])S[k]=p[k]})}catch(e){}
+function savePrefs(){try{localStorage.setItem("wd-prefs",JSON.stringify({tab:S.tab,showShelf:S.showShelf,movieShelf:S.movieShelf,diaryView:S.diaryView,sortBy:S.sortBy}))}catch(e){}}
 
 /* ---------- helpers ---------- */
 const esc=s=>String(s==null?"":s).replace(/[&<>"']/g,c=>({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;","'":"&#39;"}[c]));
@@ -309,11 +309,87 @@ function filterBox(placeholder){return'<label class="filter">'+ICON.search+'<inp
 function firstRun(){return'<div class="empty"><h2>Your diary is empty</h2><p>Add a show to track it episode by episode, or a movie to score and log it.</p><button class="btn primary" type="button" data-a="openAdd">'+ICON.plus+'Add a show or movie</button></div>'}
 function loading(){return'<div class="skeleton" aria-label="Loading your diary"><div></div><div></div><div></div><div></div><div></div><div></div></div>'}
 
+
+/* ---------- sort & filter (Movies / Shows) ---------- */
+const SORTS={
+  recent:"Recently watched",firstNew:"First watched: newest",firstOld:"First watched: oldest",
+  relNew:"Release: newest",relOld:"Release: oldest",score:"Your score",title:"Title A–Z",added:"Recently added"
+};
+const SCORE_F={any:"Any score",loved:"9–10 (loved)",good:"7–8",low:"1–6",unrated:"Not scored"};
+function midDate(lo,hi){if(!lo||!hi)return lo||hi||"";const t=(Date.parse(lo)+Date.parse(hi))/2;return new Date(t).toISOString().slice(0,10)}
+function firstWatchInfo(it){
+  if(it.kind==="movie"){
+    const ws=watchesOf(it);
+    const u=ws.find(w=>!w.d);
+    if(u)return u.lo||u.hi?{d:midDate(u.lo,u.hi),approx:true}:null;
+    if(it.first&&it.first.known&&it.first.date)return{d:it.first.date,approx:false};
+    const firsts=ws.filter(w=>w.d).sort((a,b)=>a.d.localeCompare(b.d));
+    return firsts[0]?{d:firsts[0].d,approx:(firsts[0].c||"confirmed")!=="confirmed"}:null;
+  }
+  let min="",undated=false;
+  (it.seasons||[]).forEach(se=>se.eps.forEach(e=>{if(e.w===""){undated=true}else if(e.w&&(!min||e.w<min))min=e.w}));
+  return min?{d:min,approx:undated}:null;
+}
+function relYear(it){return parseInt(it.year,10)||0}
+function getSort(kind){return(S.sortBy&&S.sortBy[kind])||"recent"}
+function getF(kind){return(S.filt&&S.filt[kind])||{score:"any",decade:"any",fy:"any"}}
+function applyFilters(kind,items){
+  const f=getF(kind);
+  return items.filter(([,it])=>{
+    const sc=scoreOf(it);
+    if(f.score==="loved"&&sc<9)return false;
+    if(f.score==="good"&&(sc<7||sc>8))return false;
+    if(f.score==="low"&&(!sc||sc>6))return false;
+    if(f.score==="unrated"&&sc)return false;
+    if(f.decade!=="any"){const y=relYear(it);if(!y||Math.floor(y/10)*10!==+f.decade)return false}
+    if(f.fy!=="any"){const fw=firstWatchInfo(it);if(!fw||fw.d.slice(0,4)!==f.fy)return false}
+    return true;
+  });
+}
+function sortItems(kind,items){
+  const k=getSort(kind);
+  const fw=new Map(items.map(([id,it])=>[id,(firstWatchInfo(it)||{}).d||""]));
+  const lastOf=it=>kind==="movie"?sortKey(it):(lastWatch(it)||"");
+  const cmp={
+    recent:(a,b)=>lastOf(b[1]).localeCompare(lastOf(a[1]))||(b[1].pos||0)-(a[1].pos||0)||(b[1].updatedAt||0)-(a[1].updatedAt||0),
+    firstNew:(a,b)=>(fw.get(b[0])||"").localeCompare(fw.get(a[0])||"")||(b[1].pos||0)-(a[1].pos||0),
+    firstOld:(a,b)=>(fw.get(a[0])||"9999").localeCompare(fw.get(b[0])||"9999")||(a[1].pos||0)-(b[1].pos||0),
+    relNew:(a,b)=>relYear(b[1])-relYear(a[1])||String(a[1].title).localeCompare(String(b[1].title)),
+    relOld:(a,b)=>(relYear(a[1])||9999)-(relYear(b[1])||9999)||String(a[1].title).localeCompare(String(b[1].title)),
+    score:(a,b)=>scoreOf(b[1])-scoreOf(a[1])||lastOf(b[1]).localeCompare(lastOf(a[1])),
+    title:(a,b)=>String(a[1].title).replace(/^(the|a|an)\s+/i,"").localeCompare(String(b[1].title).replace(/^(the|a|an)\s+/i,""),undefined,{sensitivity:"base"}),
+    added:(a,b)=>(b[1].addedAt||0)-(a[1].addedAt||0)
+  }[k]||(()=>0);
+  return items.slice().sort(cmp);
+}
+function tileNote(kind,it){
+  const k=getSort(kind);
+  if(k==="firstNew"||k==="firstOld"){const f=firstWatchInfo(it);return f?(f.approx?"~":"")+(f.approx?f.d.slice(0,4):fmtDate(f.d)):"First watch unknown"}
+  if(k==="relNew"||k==="relOld")return it.year?String(it.year):"";
+  if(k==="recent"){const l=lastWatch(it);return l?fmtDate(l):""}
+  return "";
+}
+function controls(kind,all){
+  const f=getF(kind),k=getSort(kind);
+  const decades=[...new Set(all.map(([,it])=>relYear(it)).filter(Boolean).map(y=>Math.floor(y/10)*10))].sort((a,b)=>b-a);
+  const years=[...new Set(all.map(([,it])=>(firstWatchInfo(it)||{}).d).filter(Boolean).map(d=>d.slice(0,4)))].sort().reverse();
+  const sel=(id,c,opts,cur,label)=>'<label class="ctl"><span>'+label+'</span><select id="'+id+'" data-c="'+c+'" data-k="'+kind+'">'+opts.map(([v,l])=>'<option value="'+v+'"'+(v===cur?" selected":"")+'>'+esc(l)+'</option>').join("")+'</select></label>';
+  const active=(f.score!=="any")+(f.decade!=="any")+(f.fy!=="any");
+  return'<div class="controls">'+
+    sel("sort-"+kind,"sortBy",Object.entries(SORTS),k,"Sort")+
+    sel("fs-"+kind,"fScore",Object.entries(SCORE_F),f.score,"Score")+
+    sel("fd-"+kind,"fDecade",[["any","Any decade"]].concat(decades.map(d=>[String(d),d+"s"])),f.decade,"Released")+
+    sel("fy-"+kind,"fYear",[["any","Any year"]].concat(years.map(y=>[y,y])),f.fy,"First watched")+
+    (active?'<button class="link" type="button" data-a="clearFilters" data-k="'+kind+'">Clear filters</button>':"")+
+  '</div>';
+}
 function showsBody(){
   const all=list("show");const q=norm(S.q);
-  const items=all.filter(([,it])=>q?norm(it.title).includes(q):it.shelf===S.showShelf).sort((a,b)=>(b[1].updatedAt||0)-(a[1].updatedAt||0));
+  const items=sortItems("show",applyFilters("show",all.filter(([,it])=>q?norm(it.title).includes(q):it.shelf===S.showShelf)));
+  const fa=getF("show");const filtered=fa.score!=="any"||fa.decade!=="any"||fa.fy!=="any";
   if(!items.length){
     if(q)return'<div class="empty"><p>No shows match “'+esc(S.q)+'”.</p></div>';
+    if(filtered)return'<div class="empty"><p>No shows on this shelf match these filters.</p></div>';
     const msg={watching:"Shows you're in the middle of appear here, with the next episode one tap away.",notstarted:"Shows you've added but haven't started.",paused:"Nothing on pause.",stopped:"Nothing you've given up on.",completed:"Finished shows land here."}[S.showShelf];
     return'<div class="empty"><p>'+msg+'</p><button class="btn ghost" type="button" data-a="openAdd">'+ICON.plus+'Add a show</button></div>';
   }
@@ -326,27 +402,30 @@ function showsBody(){
         (n?'<button class="check-big" type="button" data-a="watchNext" data-id="'+id+'" aria-label="Mark '+code(n.s,n.e.n)+' watched">'+ICON.check+'</button>':'<span></span>')+'</div>';
     }).join("")+'</div>';
   }
-  return'<div class="grid">'+items.map(([id,it])=>{const p=progress(it);
-    return'<button class="tile" type="button" data-a="open" data-id="'+id+'">'+cover(it)+'<span class="t">'+esc(it.title)+'</span><span class="m">'+(scoreOf(it)?scorePill(it)+" ":"")+p.w+'/'+p.total+' eps</span></button>'}).join("")+'</div>';
+  return'<p class="result-count">'+items.length+' show'+(items.length===1?"":"s")+'</p><div class="grid">'+items.map(([id,it])=>{const p=progress(it);const note=tileNote("show",it);
+    return'<button class="tile" type="button" data-a="open" data-id="'+id+'">'+cover(it)+'<span class="t">'+esc(it.title)+'</span><span class="m">'+(scoreOf(it)?scorePill(it)+" ":"")+(note?esc(note):p.w+'/'+p.total+' eps')+'</span></button>'}).join("")+'</div>';
 }
 function showsView(){
   const all=list("show");const counts={};SHOW_SHELVES.forEach(([k])=>counts[k]=0);all.forEach(([,it])=>counts[it.shelf]=(counts[it.shelf]||0)+1);
   return'<div class="head"><h1>Shows</h1><span class="count">'+all.length+' TRACKED</span></div>'+(all.length>8?filterBox("Search your shows"):"")+
-    (S.q?"":chips(SHOW_SHELVES,S.showShelf,counts,"showShelf"))+'<div id="lib">'+showsBody()+'</div>';
+    (S.q?"":chips(SHOW_SHELVES,S.showShelf,counts,"showShelf"))+controls("show",all)+'<div id="lib">'+showsBody()+'</div>';
 }
 function moviesBody(){
   const all=list("movie");const q=norm(S.q);
-  const items=all.filter(([,it])=>q?norm(it.title).includes(q):it.shelf===S.movieShelf).sort((a,b)=>S.movieShelf==="watched"&&!q?sortKey(b[1]).localeCompare(sortKey(a[1]))||(b[1].pos||0)-(a[1].pos||0):(b[1].addedAt||0)-(a[1].addedAt||0));
+  const items=sortItems("movie",applyFilters("movie",all.filter(([,it])=>q?norm(it.title).includes(q):it.shelf===S.movieShelf)));
+  const fa=getF("movie");const filtered=fa.score!=="any"||fa.decade!=="any"||fa.fy!=="any";
   if(!items.length){
     if(q)return'<div class="empty"><p>No movies match “'+esc(S.q)+'”.</p></div>';
+    if(filtered)return'<div class="empty"><p>No movies on this shelf match these filters.</p></div>';
     return'<div class="empty"><p>'+(S.movieShelf==="watched"?"Movies you've seen go here, with your score under each poster.":"Movies you want to see go here.")+'</p><button class="btn ghost" type="button" data-a="openAdd">'+ICON.plus+'Add a movie</button></div>';
   }
-  return'<div class="grid">'+items.map(([id,it])=>'<button class="tile" type="button" data-a="open" data-id="'+id+'">'+cover(it)+'<span class="t">'+esc(it.title)+'</span><span class="m">'+(scoreOf(it)?scorePill(it):(it.year||""))+(lovedOf(it)?' <span style="color:var(--heart)">♥</span>':"")+'</span></button>').join("")+'</div>';
+  return'<p class="result-count">'+items.length+' film'+(items.length===1?"":"s")+'</p><div class="grid">'+items.map(([id,it])=>{const note=tileNote("movie",it);
+    return'<button class="tile" type="button" data-a="open" data-id="'+id+'">'+cover(it)+'<span class="t">'+esc(it.title)+'</span><span class="m">'+scorePill(it)+(lovedOf(it)?' <span style="color:var(--heart)">♥</span> ':"")+(note?' '+esc(note):(scoreOf(it)?"":esc(it.year||"")))+'</span></button>'}).join("")+'</div>';
 }
 function moviesView(){
   const all=list("movie");const counts={watched:0,watchlist:0};all.forEach(([,it])=>counts[it.shelf]=(counts[it.shelf]||0)+1);
   return'<div class="head"><h1>Movies</h1><span class="count">'+counts.watched+' WATCHED</span></div>'+(all.length>8?filterBox("Search your movies"):"")+
-    (S.q?"":chips(MOVIE_SHELVES,S.movieShelf,counts,"movieShelf"))+'<div id="lib">'+moviesBody()+'</div>';
+    (S.q?"":chips(MOVIE_SHELVES,S.movieShelf,counts,"movieShelf"))+controls("movie",all)+'<div id="lib">'+moviesBody()+'</div>';
 }
 
 function diaryEntries(){
@@ -778,7 +857,7 @@ async function runImport(){
       if(oldId&&oldId!==r.id&&!doc.needsMatch){const old=S.items.get(oldId);if(old)doc=mergeDocs(old,doc);dels.push(oldId)}
       const prior=built.get(r.id)||S.items.get(r.id);
       if(prior)doc=mergeDocs(prior,doc);
-      correctConfidence(doc);
+      correctConfidence(doc);clearTvTimeRatings(doc);
       doc.updatedAt=Date.now();built.set(r.id,doc);
       buffer=buffer.filter(x=>x.id!==r.id);buffer.push({id:r.id,doc});
       if(doc.needsMatch)I.unmatched.push(r.id);else I.matched++;
@@ -847,7 +926,7 @@ async function repairLibrary(){
         const pendingNew=buf.find(r=>r.id===newId);
         const target=pendingNew?pendingNew.doc:(newId!==oldId&&S.items.has(newId)?S.items.get(newId):null);
         if(target)doc=mergeDocs(target,doc);
-        delete doc.needsMatch;correctConfidence(doc);doc.confV=CONF_V;doc.updatedAt=Date.now();
+        delete doc.needsMatch;correctConfidence(doc);doc.confV=CONF_V;clearTvTimeRatings(doc);doc.updatedAt=Date.now();
         buf=buf.filter(r=>r.id!==newId);buf.push({id:newId,doc});if(newId!==oldId)dels.push(oldId);
         F.matched++;
       }catch(e){F.failed++}
@@ -859,9 +938,29 @@ async function repairLibrary(){
   }catch(e){F.phase="error";F.err=(e&&e.message)||"connection problem"}
   render();
 }
+/* TV Time stored ratings as internal codes and the conversion to stars was a guess that
+   turned out wrong (its "4/10" was a top rating). Every TV Time rating is removed: film
+   scores still equal to the imported value, per-viewing ratings, episode ratings and show
+   averages. A score changed by hand since the import is kept. */
+const RATING_V=1;
+const TVTIME_SCORES={"m:tt0133093":4,"m:tt0075314":4,"m:tt0234215":10,"m:tt0116282":4,"m:tt0242653":10,"m:tt0421715":8,"m:tt0910970":4,"m:tt1817273":4,"m:tt0046521":4,"m:tt0470752":4,"m:tt3783958":10,"m:tt5776858":10,"m:tt11271038":10,"m:tt28607951":10,"m:tt22022452":10,"m:tt2953050":6,"m:tt1219289":8,"m:tt2980516":6,"m:tt30144839":10,"m:tt1312221":8,"m:tt34966650":8,"m:tt0059742":10,"m:tt31193180":6,"m:tt32916440":4,"m:tt29768334":4,"m:-2023":4,"m:donnie-darko-2004":4,"m:the-wonderful-story-of-henry-sugar-2023":10,"m:skyscraper-live-2026":4,"m:the-thinking-game-2024":8,"m:eraserhead-1982":10,"m:the-rise-of-the-red-hot-chili-peppers-our-brother-hillel-2026":10,"m:-2002":4};
+function clearTvTimeRatings(doc){
+  if((doc.ratV||0)>=RATING_V)return false;
+  const key=doc.imp&&doc.imp.key;
+  if(doc.kind==="movie"){
+    if(key&&TVTIME_SCORES[key]!=null&&doc.score===TVTIME_SCORES[key])doc.score=0;
+    (doc.watches||[]).forEach(w=>{if(w.via)delete w.s});
+  }else{
+    (doc.seasons||[]).forEach(se=>se.eps.forEach(e=>{delete e.s}));
+    delete doc.avgEpRating;
+  }
+  delete doc.ratingImported;
+  doc.ratV=RATING_V;
+  return true;
+}
 async function migrateConfidence(){
   const fixed=[];
-  for(const[id,d]of S.items){if((d.confV||0)>=CONF_V)continue;const c=JSON.parse(JSON.stringify(d));if(correctConfidence(c)){c.updatedAt=Date.now();fixed.push({id,doc:c})}}
+  for(const[id,d]of S.items){if((d.confV||0)>=CONF_V&&(d.ratV||0)>=RATING_V)continue;const c=JSON.parse(JSON.stringify(d));const a=correctConfidence(c),b=clearTvTimeRatings(c);if(a||b){c.updatedAt=Date.now();fixed.push({id,doc:c})}}
   if(!fixed.length)return;
   try{await upsertRows(fixed.map(r=>({id:r.id,data:r.doc,updated_at:new Date().toISOString()})));fixed.forEach(r=>S.items.set(r.id,r.doc));scheduleCache();render()}catch(e){}
 }
@@ -934,6 +1033,7 @@ const A={
   removeWatch:d=>{const id=S.openId;const it=clone(id);const i=+d.v;const was=it.watches[i];if(!was)return;it.watches.splice(i,1);save(id,it);
     toast("Watch removed",{label:"Undo",fn:()=>{const c=clone(id);c.watches=watchesOf(c).concat(was);save(id,c)}})},
   repair:()=>repairLibrary(),
+  clearFilters:d=>{S.filt=Object.assign({},S.filt,{[d.k]:{score:"any",decade:"any",fy:"any"}});render()},
   dismissFix:()=>{S.fix=null;render()},
   openImport:()=>{S.imp=S.imp&&S.imp.phase==="running"?S.imp:{phase:"pick"};S.settings=true;render()},
   startImport:()=>{if(S.imp&&S.imp.data)runImport()},
@@ -968,6 +1068,8 @@ document.addEventListener("change",e=>{
   if(c==="epDate"){const id=S.openId;const it=clone(id);const ep=findEp(it,+el.dataset.s,+el.dataset.e);if(ep){ep.w=el.value||"";save(id,it)}}
   else if(c==="notes"){const it=clone(S.openId);if((it.notes||"")!==el.value){it.notes=el.value.slice(0,5000);save(S.openId,it)}}
   else if(c==="logNoDate"){S.logNoDate=el.checked;render()}
+  else if(c==="sortBy"){S.sortBy=Object.assign({},S.sortBy,{[el.dataset.k]:el.value});savePrefs();render()}
+  else if(c==="fScore"||c==="fDecade"||c==="fYear"){const k=el.dataset.k;const f=Object.assign({},getF(k));f[{fScore:"score",fDecade:"decade",fYear:"fy"}[c]]=el.value;S.filt=Object.assign({},S.filt,{[k]:f});render()}
   else if(c==="impFile"){const f=el.files&&el.files[0];if(!f)return;
     readImportFile(f).then(data=>{S.imp={phase:"ready",data,skipShows:!data.episodesIncluded};render()}).catch(err=>{S.imp={phase:"pick",err:err.message};render()})}
 });
