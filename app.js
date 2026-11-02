@@ -857,7 +857,7 @@ async function runImport(){
       if(oldId&&oldId!==r.id&&!doc.needsMatch){const old=S.items.get(oldId);if(old)doc=mergeDocs(old,doc);dels.push(oldId)}
       const prior=built.get(r.id)||S.items.get(r.id);
       if(prior)doc=mergeDocs(prior,doc);
-      correctConfidence(doc);clearTvTimeRatings(doc);
+      correctConfidence(doc);fixTvTimeRatings(doc);
       doc.updatedAt=Date.now();built.set(r.id,doc);
       buffer=buffer.filter(x=>x.id!==r.id);buffer.push({id:r.id,doc});
       if(doc.needsMatch)I.unmatched.push(r.id);else I.matched++;
@@ -926,7 +926,7 @@ async function repairLibrary(){
         const pendingNew=buf.find(r=>r.id===newId);
         const target=pendingNew?pendingNew.doc:(newId!==oldId&&S.items.has(newId)?S.items.get(newId):null);
         if(target)doc=mergeDocs(target,doc);
-        delete doc.needsMatch;correctConfidence(doc);doc.confV=CONF_V;clearTvTimeRatings(doc);doc.updatedAt=Date.now();
+        delete doc.needsMatch;correctConfidence(doc);doc.confV=CONF_V;fixTvTimeRatings(doc);doc.updatedAt=Date.now();
         buf=buf.filter(r=>r.id!==newId);buf.push({id:newId,doc});if(newId!==oldId)dels.push(oldId);
         F.matched++;
       }catch(e){F.failed++}
@@ -938,20 +938,26 @@ async function repairLibrary(){
   }catch(e){F.phase="error";F.err=(e&&e.message)||"connection problem"}
   render();
 }
-/* TV Time stored ratings as internal codes and the conversion to stars was a guess that
-   turned out wrong (its "4/10" was a top rating). Every TV Time rating is removed: film
-   scores still equal to the imported value, per-viewing ratings, episode ratings and show
-   averages. A score changed by hand since the import is kept. */
-const RATING_V=1;
-const TVTIME_SCORES={"m:tt0133093":4,"m:tt0075314":4,"m:tt0234215":10,"m:tt0116282":4,"m:tt0242653":10,"m:tt0421715":8,"m:tt0910970":4,"m:tt1817273":4,"m:tt0046521":4,"m:tt0470752":4,"m:tt3783958":10,"m:tt5776858":10,"m:tt11271038":10,"m:tt28607951":10,"m:tt22022452":10,"m:tt2953050":6,"m:tt1219289":8,"m:tt2980516":6,"m:tt30144839":10,"m:tt1312221":8,"m:tt34966650":8,"m:tt0059742":10,"m:tt31193180":6,"m:tt32916440":4,"m:tt29768334":4,"m:-2023":4,"m:donnie-darko-2004":4,"m:the-wonderful-story-of-henry-sugar-2023":10,"m:skyscraper-live-2026":4,"m:the-thinking-game-2024":8,"m:eraserhead-1982":10,"m:the-rise-of-the-red-hot-chili-peppers-our-brother-hillel-2026":10,"m:-2002":4};
-function clearTvTimeRatings(doc){
+/* TV Time stored ratings as internal codes; the import's conversion read one code wrong.
+   Jonah confirmed: the code imported as 4/10 is a top rating (9), the codes imported as
+   6, 8 and 10 were right. v1 removed them all; v2 restores every TV Time rating with the
+   corrected value. Each entry is [value as first imported, corrected value]. A value is
+   written only where nothing is set or the wrong imported value is still there, so a
+   score changed by hand is never touched. The 3 episode ratings that used TV Time's
+   lowest code stay unrated: no film used it, so its value can't be confirmed. */
+const RATING_V=2;
+const RATING_FIX={films:{"m:tt0133093":[4,9],"m:tt0075314":[4,9],"m:tt0234215":[10,10],"m:tt0116282":[4,9],"m:tt0242653":[10,10],"m:tt0421715":[8,8],"m:tt0910970":[4,9],"m:tt1817273":[4,9],"m:tt0046521":[4,9],"m:tt0470752":[4,9],"m:tt3783958":[10,10],"m:tt5776858":[10,10],"m:tt11271038":[10,10],"m:tt28607951":[10,10],"m:tt22022452":[10,10],"m:tt2953050":[6,6],"m:tt1219289":[8,8],"m:tt2980516":[6,6],"m:tt30144839":[10,10],"m:tt1312221":[8,8],"m:tt34966650":[8,8],"m:tt0059742":[10,10],"m:tt31193180":[6,6],"m:tt32916440":[4,9],"m:tt29768334":[4,9],"m:-2023":[4,9],"m:donnie-darko-2004":[4,9],"m:the-wonderful-story-of-henry-sugar-2023":[10,10],"m:skyscraper-live-2026":[4,9],"m:the-thinking-game-2024":[8,8],"m:eraserhead-1982":[10,10],"m:the-rise-of-the-red-hot-chili-peppers-our-brother-hillel-2026":[10,10],"m:-2002":[4,9]},views:{"m:tt0133093":{"2025-05-29":[4,9]},"m:tt0075314":{"2026-02-01":[4,9]},"m:tt0234215":{"2025-06-11":[10,10]},"m:tt0116282":{"2026-02-23":[4,9]},"m:tt0242653":{"2025-08-27":[10,10]},"m:tt0421715":{"2025-12-19":[8,8]},"m:tt0910970":{"2026-03-30":[4,9]},"m:tt1817273":{"2015-08-31":[4,9],"2025-07-15":[4,9]},"m:tt0046521":{"2025-10-22":[4,9]},"m:tt0470752":{"2026-02-22":[4,9]},"m:tt3783958":{"2017-09-24":[10,10],"2025-10-27":[10,10]},"m:tt5776858":{"2018-01-29":[10,10],"2025-11-27":[10,10]},"m:tt11271038":{"2022-02-20":[10,10]},"m:tt28607951":{"2025-04-06":[10,10]},"m:tt22022452":{"2025-07-08":[10,10]},"m:tt2953050":{"2025-08-31":[6,6]},"m:tt1219289":{"2025-09-30":[8,8]},"m:tt2980516":{"2025-10-27":[6,6]},"m:tt30144839":{"2025-11-28":[10,10]},"m:tt1312221":{"2025-12-02":[8,8]},"m:tt34966650":{"2025-12-29":[8,8]},"m:tt0059742":{"2026-01-02":[10,10]},"m:tt31193180":{"2026-01-12":[6,6]},"m:tt32916440":{"2026-01-25":[4,9]},"m:tt29768334":{"2026-02-22":[4,9]},"m:-2023":{"2023-12-19":[4,9]},"m:donnie-darko-2004":{"2025-09-12":[4,9]},"m:the-wonderful-story-of-henry-sugar-2023":{"2025-09-26":[10,10]},"m:skyscraper-live-2026":{"2026-01-29":[4,9]},"m:the-thinking-game-2024":{"2026-02-11":[8,8]},"m:eraserhead-1982":{"2026-03-02":[10,10]},"m:the-rise-of-the-red-hot-chili-peppers-our-brother-hillel-2026":{"2026-04-05":[10,10]},"m:-2002":{"2026-06-21":[4,9]}},eps:{"s:how-i-met-your-mother":{"9x24":[8,8],"9x23":[4,9],"9x21":[10,10],"9x22":[4,9],"9x20":[10,10],"9x19":[8,8],"9x18":[10,10],"9x17":[4,9],"9x16":[4,9],"9x15":[10,10],"9x13":[10,10],"9x14":[10,10],"9x12":[10,10],"9x11":[10,10],"9x10":[8,8],"9x8":[10,10],"9x9":[10,10],"9x6":[10,10],"9x7":[10,10],"9x5":[10,10],"9x2":[10,10],"9x3":[10,10],"9x4":[10,10],"9x1":[10,10],"8x22":[10,10],"8x23":[10,10],"8x24":[4,9],"8x21":[10,10],"8x20":[10,10],"8x19":[10,10],"8x17":[10,10],"8x18":[10,10],"8x16":[10,10],"8x15":[10,10],"8x12":[10,10],"8x13":[10,10],"8x14":[10,10],"8x10":[10,10],"8x11":[8,8],"8x7":[6,6],"8x8":[10,10],"8x9":[8,8],"8x6":[10,10],"8x3":[10,10],"8x4":[10,10],"8x5":[10,10],"8x2":[10,10],"8x1":[10,10],"7x23":[4,9],"7x24":[4,9],"7x20":[10,10],"7x21":[10,10],"7x18":[10,10],"7x19":[10,10],"7x17":[10,10],"7x16":[4,9],"7x13":[8,8],"7x14":[10,10],"7x15":[4,9],"7x11":[10,10],"7x12":[4,9],"7x8":[8,8],"7x9":[4,9],"7x10":[4,9],"7x4":[10,10],"7x5":[8,8],"7x6":[10,10],"7x7":[10,10],"7x2":[10,10],"7x3":[10,10],"7x1":[10,10],"6x24":[4,9],"6x22":[4,9],"6x23":[10,10],"6x20":[10,10],"6x21":[10,10],"6x19":[4,9],"6x17":[10,10],"6x18":[4,9],"6x14":[10,10],"6x15":[10,10],"6x16":[4,9],"6x13":[10,10],"6x9":[10,10],"6x10":[10,10],"6x11":[10,10],"6x12":[10,10],"6x4":[4,9],"6x5":[10,10],"6x6":[10,10],"6x7":[8,8],"6x8":[10,10],"6x1":[10,10],"6x2":[10,10],"6x3":[10,10],"5x24":[4,9],"5x19":[10,10],"5x20":[10,10],"5x21":[4,9],"5x22":[10,10],"5x23":[6,6],"5x18":[10,10],"5x16":[10,10],"5x17":[10,10],"5x15":[10,10],"5x13":[10,10],"5x14":[10,10],"5x11":[10,10],"5x12":[10,10],"5x8":[10,10],"5x9":[10,10],"5x10":[10,10],"5x7":[8,8],"5x5":[10,10],"5x6":[10,10],"5x4":[8,8],"5x3":[8,8],"5x2":[4,9],"4x24":[10,10],"5x1":[10,10],"4x23":[8,8],"4x21":[10,10],"4x22":[4,9],"4x20":[10,10],"4x19":[10,10],"4x17":[10,10],"4x18":[8,8],"4x16":[8,8],"4x14":[10,10],"4x15":[10,10],"4x12":[10,10],"4x13":[8,8],"4x11":[8,8],"4x10":[8,8],"4x8":[10,10],"4x9":[10,10],"4x7":[10,10],"4x6":[10,10],"4x5":[4,9],"4x3":[10,10],"4x4":[10,10],"3x20":[10,10],"4x1":[4,9],"4x2":[10,10],"3x19":[8,8],"3x18":[10,10],"3x17":[10,10],"3x15":[10,10],"3x16":[10,10],"3x14":[8,8],"3x11":[4,9],"3x12":[8,8],"3x13":[8,8]},"s:rick-and-morty":{"9x1":[10,10],"8x8":[8,8],"8x9":[8,8],"8x10":[6,6],"8x5":[10,10],"8x6":[8,8],"8x7":[8,8],"8x4":[8,8],"8x2":[8,8],"8x3":[8,8],"8x1":[8,8]},"s:the-dark-wizard":{"1x3":[4,9],"1x4":[4,9],"1x2":[10,10],"1x1":[10,10]},"s:boy-band-confidential":{"1x1":[8,8]},"s:a-knight-of-the-seven-kingdoms":{"1x6":[8,8],"1x5":[8,8],"1x3":[10,10],"1x4":[8,8],"1x2":[8,8],"1x1":[8,8]},"s:alone":{"11x2":[8,8],"11x3":[10,10],"0x12":[6,6],"11x1":[8,8]},"s:the-last-of-us":{"2x7":[10,10],"2x6":[10,10],"2x5":[10,10],"2x4":[8,8],"2x3":[8,8],"2x2":[4,9],"2x1":[8,8]},"s:stranger-things":{"5x8":[8,8],"5x7":[6,6],"5x5":[8,8],"5x6":[8,8],"5x4":[10,10],"5x2":[8,8],"5x3":[10,10],"5x1":[10,10]},"s:america-s-team-the-gambler-and-his-cowboys":{"1x8":[8,8],"1x4":[10,10],"1x5":[10,10],"1x6":[4,9],"1x7":[10,10],"1x2":[10,10],"1x3":[10,10],"1x1":[8,8]},"s:loudermilk":{"1x1":[6,6]},"s:100-foot-wave":{"3x5":[4,9],"3x4":[10,10],"3x3":[10,10],"3x2":[10,10],"3x1":[10,10]},"s:south-park":{"27x3":[8,8],"27x1":[8,8],"27x2":[6,6]},"s:black-mirror":{"7x6":[4,9],"7x4":[8,8],"7x5":[10,10],"7x3":[10,10],"7x2":[8,8],"7x1":[10,10]},"s:portlandia":{"4x1":[8,8]},"s:the-rehearsal":{"2x6":[4,9],"2x5":[10,10],"2x4":[4,9],"2x2":[4,9],"2x3":[4,9],"2x1":[8,8]},"s:the-bear":{"3x10":[8,8],"3x9":[10,10],"3x8":[4,9],"3x7":[4,9],"3x6":[4,9],"3x4":[10,10],"3x5":[10,10],"3x3":[10,10],"3x2":[10,10],"3x1":[4,9]},"s:adolescence":{"1x4":[4,9],"1x3":[4,9],"1x2":[8,8],"1x1":[10,10]},"s:shtisel":{"2x6":[4,9],"2x5":[4,9],"2x4":[4,9],"2x3":[4,9],"2x2":[4,9],"2x1":[4,9]},"s:nathan-for-you":{"3x3":[4,9],"3x4":[10,10],"3x5":[4,9],"3x2":[10,10],"3x1":[4,9]},"s:girls":{"4x8":[6,6],"4x9":[6,6]}}};
+function fixTvTimeRatings(doc){
   if((doc.ratV||0)>=RATING_V)return false;
   const key=doc.imp&&doc.imp.key;
+  const put=(cur,pair)=>(cur==null||cur===0||cur===pair[0])?pair[1]:cur;
   if(doc.kind==="movie"){
-    if(key&&TVTIME_SCORES[key]!=null&&doc.score===TVTIME_SCORES[key])doc.score=0;
-    (doc.watches||[]).forEach(w=>{if(w.via)delete w.s});
+    const f=key&&RATING_FIX.films[key];if(f)doc.score=put(doc.score,f);
+    const v=key&&RATING_FIX.views[key];
+    (doc.watches||[]).forEach(w=>{if(v&&w.d&&v[w.d])w.s=put(w.s,v[w.d]);else if(w.via&&w.s!=null&&(doc.ratV||0)<1)delete w.s});
   }else{
-    (doc.seasons||[]).forEach(se=>se.eps.forEach(e=>{delete e.s}));
+    const t=key&&RATING_FIX.eps[key];
+    (doc.seasons||[]).forEach(se=>se.eps.forEach(e=>{const x=t&&t[se.n+"x"+e.n];if(x)e.s=put(e.s,x);else if(e.s!=null&&(doc.ratV||0)<1)delete e.s}));
     delete doc.avgEpRating;
   }
   delete doc.ratingImported;
@@ -960,7 +966,7 @@ function clearTvTimeRatings(doc){
 }
 async function migrateConfidence(){
   const fixed=[];
-  for(const[id,d]of S.items){if((d.confV||0)>=CONF_V&&(d.ratV||0)>=RATING_V)continue;const c=JSON.parse(JSON.stringify(d));const a=correctConfidence(c),b=clearTvTimeRatings(c);if(a||b){c.updatedAt=Date.now();fixed.push({id,doc:c})}}
+  for(const[id,d]of S.items){if((d.confV||0)>=CONF_V&&(d.ratV||0)>=RATING_V)continue;const c=JSON.parse(JSON.stringify(d));const a=correctConfidence(c),b=fixTvTimeRatings(c);if(a||b){c.updatedAt=Date.now();fixed.push({id,doc:c})}}
   if(!fixed.length)return;
   try{await upsertRows(fixed.map(r=>({id:r.id,data:r.doc,updated_at:new Date().toISOString()})));fixed.forEach(r=>S.items.set(r.id,r.doc));scheduleCache();render()}catch(e){}
 }
