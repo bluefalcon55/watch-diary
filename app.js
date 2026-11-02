@@ -561,21 +561,30 @@ function dangerZone(it){
   if(S.confirm==="delete")return'<div class="danger-zone"><p>Delete <b>'+esc(it.title)+'</b> and everything you\'ve logged for it?</p><button class="btn danger" type="button" data-a="doDelete">Delete</button><button class="btn ghost" type="button" data-a="cancelConfirm">Keep it</button></div>';
   return'<div class="danger-zone">'+(it.needsMatch?"":'<button class="link" type="button" data-a="openRelink">Wrong title? Fix the match</button>')+'<button class="link" style="color:var(--s-stopped)" type="button" data-a="askDelete">Delete from diary</button></div>';
 }
+/* Episode menu. Date fields never act on their own: the iPhone date picker sets a value
+   the moment it opens, so a date is only used when a Save / Add button is pressed. */
 function epMenuHtml(sn,e){
-  const ds=' data-s="'+sn+'" data-e="'+e.n+'"';
+  const x=ICON.x.replace("<svg",'<svg width="14" height="14"');
   let h='<li class="ep-menu">';
   if(isW(e)){
-    h+='<div class="em-row"><span class="em-k">First watch</span><label class="when"><span>'+(e.w?esc(fmtDate(e.w)):"Date unknown")+'</span><input type="date" aria-label="First watch date" data-c="epDate"'+ds+' value="'+esc(e.w||"")+'" max="'+today()+'"></label>'+
-      (e.w?'<button class="link" type="button" data-a="epUnknown">Make date unknown</button>':"")+'</div>';
-    (e.rw||[]).forEach((r,i)=>{h+='<div class="em-row"><span class="em-k">Rewatch</span><span class="mono">'+(r.d?esc(fmtDate(r.d)):"date unknown")+'</span><button class="wx" type="button" data-a="epRwDel" data-i="'+i+'" aria-label="Remove this rewatch">'+ICON.x.replace("<svg",'<svg width="14" height="14"')+'</button></div>'});
-    h+='<div class="em-actions"><button class="btn primary" type="button" data-a="epRwToday">Rewatched today</button>'+
-      '<label class="btn ghost date-btn">Rewatched on…<input type="date" aria-label="Rewatch date" data-c="epRwDate" max="'+today()+'"></label>'+
-      '<button class="btn ghost" type="button" data-a="epRwUnknown">Rewatched, date unknown</button>'+
-      '<button class="link" style="color:var(--s-stopped)" type="button" data-a="epUnwatch">Not watched</button><button class="link" type="button" data-a="epMenuClose">Done</button></div>';
+    h+='<div class="em-row"><span class="em-k">First watch</span>'+
+      '<input id="em-first" class="em-date" type="date" value="'+esc(e.w||"")+'" max="'+today()+'" aria-label="First watch date">'+
+      '<button class="btn ghost sm" type="button" data-a="epSaveFirst">Save date</button>'+
+      (e.w?'<button class="link" type="button" data-a="epUnknown">Make date unknown</button>':'<span class="hint" style="margin:0">Date unknown</span>')+'</div>';
+    (e.rw||[]).forEach((r,i)=>{h+='<div class="em-row"><span class="em-k">Rewatch</span><span class="mono">'+(r.d?esc(fmtDate(r.d)):"date unknown")+'</span><button class="wx" type="button" data-a="epRwDel" data-i="'+i+'" aria-label="Remove this rewatch">'+x+'</button></div>'});
+    h+='<div class="em-row"><span class="em-k">Add rewatch</span>'+
+      '<button class="btn primary sm" type="button" data-a="epRwToday">Today</button>'+
+      '<span class="em-or">or</span><input id="em-rw" class="em-date" type="date" max="'+today()+'" aria-label="Rewatch date">'+
+      '<button class="btn ghost sm" type="button" data-a="epRwOn">Add</button>'+
+      '<button class="btn ghost sm" type="button" data-a="epRwUnknown">Date unknown</button></div>'+
+      '<div class="em-actions"><button class="link" style="color:var(--s-stopped)" type="button" data-a="epUnwatch">Mark not watched</button><button class="link" type="button" data-a="epMenuClose">Done</button></div>';
   }else{
-    h+='<div class="em-actions"><button class="btn primary" type="button" data-a="epWatchToday">Watched today</button>'+
-      '<label class="btn ghost date-btn">Watched on…<input type="date" aria-label="Watch date" data-c="epWatchDate" max="'+today()+'"></label>'+
-      '<button class="btn ghost" type="button" data-a="epSeenUnknown">Seen, date unknown</button><button class="link" type="button" data-a="epMenuClose">Close</button></div>';
+    h+='<div class="em-row"><span class="em-k">Watched</span>'+
+      '<button class="btn primary sm" type="button" data-a="epWatchToday">Today</button>'+
+      '<span class="em-or">or</span><input id="em-watch" class="em-date" type="date" max="'+today()+'" aria-label="Watch date">'+
+      '<button class="btn ghost sm" type="button" data-a="epWatchOn">Add</button>'+
+      '<button class="btn ghost sm" type="button" data-a="epSeenUnknown">Date unknown</button></div>'+
+      '<div class="em-actions"><button class="link" type="button" data-a="epMenuClose">Close</button></div>';
   }
   return h+'</li>';
 }
@@ -600,7 +609,7 @@ function showDetail(id,it,enter){
     b+='<ul class="eps">'+cs.eps.slice().sort((a,b)=>a.n-b.n).map(e=>{const wd=isW(e),fut=!aired(e);
       return'<li class="ep'+(wd?" w":"")+(fut?" future":"")+'"><button class="tick" type="button" data-a="toggleEp" data-s="'+cs.n+'" data-e="'+e.n+'" aria-pressed="'+wd+'" aria-label="'+(wd?"Unmark ":"Mark ")+code(cs.n,e.n)+'" '+(fut?"disabled":"")+'>'+ICON.check+'</button>'+
         '<button type="button" class="et" data-a="epMenu" data-s="'+cs.n+'" data-e="'+e.n+'" '+(fut?"disabled":"")+'><span class="code">E'+pad(e.n)+(e.a&&!fut?" · "+esc(fmtDate(e.a)):"")+'</span><span class="name">'+esc(e.t||"Episode "+e.n)+'</span>'+((e.s||(e.rw&&e.rw.length))?'<span class="epx">'+(e.s?e.s+'/10':"")+(e.s&&e.rw&&e.rw.length?" · ":"")+(e.rw&&e.rw.length?"rewatched "+e.rw.map(r=>r.d?fmtDate(r.d):"date unknown").join(", "):"")+'</span>':"")+'</button>'+
-        (fut?'<span class="airs">Airs '+esc(fmtDate(e.a))+'</span>':wd?'<label class="when"><span>'+(e.w?esc(fmtDate(e.w)):"Seen")+'</span><input type="date" aria-label="Date watched for '+code(cs.n,e.n)+'" data-c="epDate" data-s="'+cs.n+'" data-e="'+e.n+'" value="'+esc(e.w||"")+'" max="'+today()+'"></label>':"<span></span>")+'</li>'+(S.epMenu===cs.n+"x"+e.n?epMenuHtml(cs.n,e):"")}).join("")+'</ul>';
+        (fut?'<span class="airs">Airs '+esc(fmtDate(e.a))+'</span>':wd?'<button type="button" class="when" data-a="epMenu" data-s="'+cs.n+'" data-e="'+e.n+'" aria-label="Edit viewings of '+code(cs.n,e.n)+'">'+(e.w?esc(fmtDate(e.w)):"Seen")+((e.rw&&e.rw.length)?" +"+e.rw.length:"")+'</button>':"<span></span>")+'</li>'+(S.epMenu===cs.n+"x"+e.n?epMenuHtml(cs.n,e):"")}).join("")+'</ul>';
   }else b+='<div class="card"><p style="margin:0;color:var(--muted)">No episodes listed yet.</p></div>';
   b+='<div class="tools">'+(!it.rewatch&&p.w>0?'<button class="btn ghost" type="button" data-a="startRewatch">Start a rewatch</button>':"")+'<button class="btn ghost" type="button" data-a="refreshShow" '+(S.refreshing?"disabled":"")+'>'+(S.refreshing?'<span class="spin"></span>Checking…':"Check for new episodes")+'</button><button class="btn ghost" type="button" data-a="openPicker">Change cover</button></div>';
   b+=dangerZone(it);
@@ -704,7 +713,7 @@ function settingsSheet(enter){
 
 /* ---------- render ---------- */
 const app=document.getElementById("app"),layer=document.getElementById("layer");
-function isTyping(){const a=document.activeElement;return!!a&&layer.contains(a)&&(a.tagName==="TEXTAREA"||(a.tagName==="INPUT"&&/^(text|search|number|email|password)$/.test(a.type)))}
+function isTyping(){const a=document.activeElement;return!!a&&layer.contains(a)&&(a.tagName==="TEXTAREA"||(a.tagName==="INPUT"&&/^(text|search|number|email|password|date|month)$/.test(a.type)))}
 function render(){
   if(isTyping()){S.renderPending=true;return}
   S.renderPending=false;
@@ -1104,6 +1113,12 @@ const A={
   epUnwatch:()=>{const id=S.openId;const{s,e}=epFromMenu();const it=clone(id);const ep=findEp(it,s,e);if(!ep)return;const prev=JSON.parse(JSON.stringify(ep));
     ep.w=null;delete ep.c;delete ep.rw;autoShelf(it,true);S.epMenu=null;save(id,it);
     toast(code(s,e)+" marked not watched",{label:"Undo",fn:()=>{const c=clone(id);const x=findEp(c,s,e);if(x){Object.assign(x,prev);save(id,c)}}})},
+  epSaveFirst:()=>{const v=(document.getElementById("em-first")||{}).value||"";if(v>today()){toast("That date is in the future.");return}
+    const{s,e}=epFromMenu();setEps(S.openId,[[s,e]],v);toast(v?"Date saved":"Date set to unknown")},
+  epRwOn:()=>{const v=(document.getElementById("em-rw")||{}).value||"";if(!v){toast("Pick a date first.");return}if(v>today()){toast("That date is in the future.");return}
+    const{s,e}=epFromMenu();watchEpisode(S.openId,s,e,v);toast("Rewatch added for "+fmtDate(v))},
+  epWatchOn:()=>{const v=(document.getElementById("em-watch")||{}).value||"";if(!v){toast("Pick a date first.");return}if(v>today()){toast("That date is in the future.");return}
+    const{s,e}=epFromMenu();S.epMenu=null;watchEpisode(S.openId,s,e,v);toast("Watched "+fmtDate(v))},
   epRwToday:()=>{const{s,e}=epFromMenu();watchEpisode(S.openId,s,e,today())},
   epRwUnknown:()=>{const id=S.openId;const{s,e}=epFromMenu();const it=clone(id);const ep=findEp(it,s,e);if(!ep)return;ep.rw=(ep.rw||[]).concat({d:"",c:"guess"});save(id,it)},
   epRwDel:d=>{const id=S.openId;const{s,e}=epFromMenu();const it=clone(id);const ep=findEp(it,s,e);if(!ep||!ep.rw)return;ep.rw.splice(+d.i,1);if(!ep.rw.length)delete ep.rw;save(id,it)},
@@ -1173,9 +1188,7 @@ document.addEventListener("input",e=>{
 });
 document.addEventListener("change",e=>{
   const el=e.target;const c=el.dataset&&el.dataset.c;if(!c)return;
-  if(c==="epRwDate"||c==="epWatchDate"){const v=el.value;if(!v)return;if(v>today()){toast("That date is in the future.");return}
-    const{s,e}=epFromMenu();if(c==="epWatchDate")S.epMenu=null;watchEpisode(S.openId,s,e,v);return}
-  if(c==="epDate"){const id=S.openId;const it=clone(id);const ep=findEp(it,+el.dataset.s,+el.dataset.e);if(ep){ep.w=el.value||"";save(id,it)}}
+
   else if(c==="notes"){const it=clone(S.openId);if((it.notes||"")!==el.value){it.notes=el.value.slice(0,5000);save(S.openId,it)}}
   else if(c==="logNoDate"){S.logNoDate=el.checked;render()}
   else if(c==="sortBy"){S.sortBy=Object.assign({},S.sortBy,{[el.dataset.k]:el.value});savePrefs();render()}

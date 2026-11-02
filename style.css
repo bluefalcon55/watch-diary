@@ -433,3 +433,8 @@ textarea{width:100%;box-sizing:border-box;min-height:96px;border:1px solid var(-
 .rc-top .link{margin-left:auto}
 .quick{display:flex;flex-wrap:wrap;gap:8px;margin:-4px 0 16px}
 .quick .btn{gap:6px}
+.em-date{padding:7px 9px;border:1px solid #CBD3FB;border-radius:9px;background:var(--surface);font:500 13px var(--f-mono);color:var(--ink);min-width:0;max-width:100%}
+.btn.sm{font-size:13px;padding:7px 11px}
+.em-or{font-size:12px;color:var(--muted)}
+.ep-menu .em-row{row-gap:8px}
+button.when{cursor:pointer}
