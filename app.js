@@ -62,7 +62,10 @@ function airedEps(it){return allEps(it).filter(x=>aired(x.e))}
 function progress(it){const a=airedEps(it);return{w:a.filter(x=>isW(x.e)).length,total:a.length}}
 /* Next episode = the first aired, unwatched one after the last episode you watched.
    Skipped older episodes (e.g. early seasons of Alone) don't count against being caught up. */
-function nextUp(it){const a=airedEps(it);let last=-1;a.forEach((x,i)=>{if(isW(x.e))last=i});for(let i=last+1;i<a.length;i++)if(!isW(a[i].e))return a[i];return null}
+function rewatched(e,from){return!!((e.w&&e.w>=from)||(e.rw||[]).some(r=>r.d&&r.d>=from))}
+function nextRewatch(it){const f=it.rewatch&&it.rewatch.from;if(!f)return null;return airedEps(it).find(x=>!rewatched(x.e,f))||null}
+function rewatchProgress(it){const f=it.rewatch&&it.rewatch.from;const a=airedEps(it);return{w:f?a.filter(x=>rewatched(x.e,f)).length:0,total:a.length}}
+function nextUp(it){if(it.rewatch&&it.rewatch.from)return nextRewatch(it);const a=airedEps(it);let last=-1;a.forEach((x,i)=>{if(isW(x.e))last=i});for(let i=last+1;i<a.length;i++)if(!isW(a[i].e))return a[i];return null}
 function nextAiring(it){const f=allEps(it).filter(x=>!aired(x.e)&&x.e.a).sort((a,b)=>a.e.a.localeCompare(b.e.a));return f[0]||null}
 function ended(it){return it.status==="Ended"||it.status==="Canceled"}
 function findEp(it,s,e){const se=(it.seasons||[]).find(x=>x.n===s);return se&&se.eps.find(x=>x.n===e)}
@@ -276,6 +279,7 @@ async function resetPassword(){
 /* ---------- mutations ---------- */
 function autoShelf(it,silent){
   if(it.kind!=="show")return;
+  if(it.rewatch){it.shelf="watching";return}
   const p=progress(it);
   if(p.total&&p.w===p.total){
     if(ended(it)&&!nextAiring(it)){if(it.shelf!=="completed"){it.shelf="completed";if(!silent)toast("Finished. Moved to Completed.")}}
@@ -283,9 +287,25 @@ function autoShelf(it,silent){
   }else if(p.w>0&&(it.shelf==="notstarted"||it.shelf==="completed"))it.shelf="watching";
 }
 function setEps(id,pairs,val){const it=clone(id);pairs.forEach(([s,e])=>{const ep=findEp(it,s,e);if(ep){ep.w=val;if(val===null)delete ep.c}});autoShelf(it);save(id,it)}
+/* Log a viewing of one episode: its first watch if never watched, otherwise a rewatch. */
+function watchEpisode(id,s,e,date,conf){
+  const it=clone(id);const ep=findEp(it,s,e);if(!ep)return null;
+  let kind;
+  if(!isW(ep)){ep.w=date;ep.c=conf||"confirmed";kind="first"}
+  else{ep.rw=(ep.rw||[]).concat({d:date,c:conf||"confirmed"});kind="re"}
+  if(it.rewatch&&!nextRewatch(it)){delete it.rewatch;it.rewatchesDone=(it.rewatchesDone||0)+1;setTimeout(()=>toast("Rewatch finished"),0)}
+  autoShelf(it,true);save(id,it);return kind;
+}
+function undoEpisode(id,s,e,kind,date){
+  const it=clone(id);const ep=findEp(it,s,e);if(!ep)return;
+  if(kind==="first"){ep.w=null;delete ep.c}
+  else if(ep.rw){const i=ep.rw.map(r=>r.d).lastIndexOf(date);if(i>=0)ep.rw.splice(i,1);if(!ep.rw.length)delete ep.rw}
+  save(id,it);
+}
+function epFromMenu(){const[s,e]=(S.epMenu||"").split("x").map(Number);return{s,e}}
 function toggleEp(id,s,e){
   const it=S.items.get(id);const ep=findEp(it,s,e);if(!ep)return;
-  if(isW(ep)){setEps(id,[[s,e]],null);return}
+  if(isW(ep)){S.epMenu=S.epMenu===s+"x"+e?null:s+"x"+e;render();return}
   setEps(id,[[s,e]],today());
   const a=airedEps(S.items.get(id));const idx=a.findIndex(x=>x.s===s&&x.e.n===e);
   const earlier=idx>0?a.slice(0,idx).filter(x=>!isW(x.e)):[];
@@ -412,10 +432,10 @@ function showsBody(){
     // Two automatic sections: shows with an aired episode waiting, and shows you're caught up on.
     // A show moves between them by itself as you watch and as new episodes air.
     const row=([id,it])=>{
-      const p=progress(it),n=nextUp(it),na=nextAiring(it);
-      const nextLine=n?'<span class="next"><b>'+code(n.s,n.e.n)+'</b>'+esc(n.e.t||"Episode "+n.e.n)+'</span>':'<span class="next caught">'+(na?"Next episode airs "+esc(fmtDate(na.e.a)):"No new episodes announced yet")+'</span>';
+      const p=it.rewatch?rewatchProgress(it):progress(it),n=nextUp(it),na=nextAiring(it);
+      const nextLine=n?'<span class="next">'+(it.rewatch?'<span class="rw" style="margin:0 6px 0 0">Rewatch</span>':"")+'<b>'+code(n.s,n.e.n)+'</b>'+esc(n.e.t||"Episode "+n.e.n)+'</span>':'<span class="next caught">'+(na?"Next episode airs "+esc(fmtDate(na.e.a)):"No new episodes announced yet")+'</span>';
       return'<div class="row'+(n?"":" row-caught")+'"><button class="open" type="button" data-a="open" data-id="'+id+'">'+cover(it,"","w185")+'<span class="info"><span class="title">'+esc(it.title)+'</span>'+nextLine+
-        '<span class="bar"><span style="width:'+(p.total?Math.round(p.w/p.total*100):0)+'%"></span></span><span class="pct">'+p.w+' of '+p.total+' watched</span></span></button>'+
+        '<span class="bar"><span style="width:'+(p.total?Math.round(p.w/p.total*100):0)+'%"></span></span><span class="pct">'+p.w+' of '+p.total+(it.rewatch?' rewatched':' watched')+'</span></span></button>'+
         (n?'<button class="check-big" type="button" data-a="watchNext" data-id="'+id+'" aria-label="Mark '+code(n.s,n.e.n)+' watched">'+ICON.check+'</button>':'<span></span>')+'</div>';
     };
     const upNext=items.filter(([,it])=>nextUp(it));
@@ -541,6 +561,24 @@ function dangerZone(it){
   if(S.confirm==="delete")return'<div class="danger-zone"><p>Delete <b>'+esc(it.title)+'</b> and everything you\'ve logged for it?</p><button class="btn danger" type="button" data-a="doDelete">Delete</button><button class="btn ghost" type="button" data-a="cancelConfirm">Keep it</button></div>';
   return'<div class="danger-zone">'+(it.needsMatch?"":'<button class="link" type="button" data-a="openRelink">Wrong title? Fix the match</button>')+'<button class="link" style="color:var(--s-stopped)" type="button" data-a="askDelete">Delete from diary</button></div>';
 }
+function epMenuHtml(sn,e){
+  const ds=' data-s="'+sn+'" data-e="'+e.n+'"';
+  let h='<li class="ep-menu">';
+  if(isW(e)){
+    h+='<div class="em-row"><span class="em-k">First watch</span><label class="when"><span>'+(e.w?esc(fmtDate(e.w)):"Date unknown")+'</span><input type="date" aria-label="First watch date" data-c="epDate"'+ds+' value="'+esc(e.w||"")+'" max="'+today()+'"></label>'+
+      (e.w?'<button class="link" type="button" data-a="epUnknown">Make date unknown</button>':"")+'</div>';
+    (e.rw||[]).forEach((r,i)=>{h+='<div class="em-row"><span class="em-k">Rewatch</span><span class="mono">'+(r.d?esc(fmtDate(r.d)):"date unknown")+'</span><button class="wx" type="button" data-a="epRwDel" data-i="'+i+'" aria-label="Remove this rewatch">'+ICON.x.replace("<svg",'<svg width="14" height="14"')+'</button></div>'});
+    h+='<div class="em-actions"><button class="btn primary" type="button" data-a="epRwToday">Rewatched today</button>'+
+      '<label class="btn ghost date-btn">Rewatched on…<input type="date" aria-label="Rewatch date" data-c="epRwDate" max="'+today()+'"></label>'+
+      '<button class="btn ghost" type="button" data-a="epRwUnknown">Rewatched, date unknown</button>'+
+      '<button class="link" style="color:var(--s-stopped)" type="button" data-a="epUnwatch">Not watched</button><button class="link" type="button" data-a="epMenuClose">Done</button></div>';
+  }else{
+    h+='<div class="em-actions"><button class="btn primary" type="button" data-a="epWatchToday">Watched today</button>'+
+      '<label class="btn ghost date-btn">Watched on…<input type="date" aria-label="Watch date" data-c="epWatchDate" max="'+today()+'"></label>'+
+      '<button class="btn ghost" type="button" data-a="epSeenUnknown">Seen, date unknown</button><button class="link" type="button" data-a="epMenuClose">Close</button></div>';
+  }
+  return h+'</li>';
+}
 function showDetail(id,it,enter){
   const p=progress(it),n=nextUp(it),na=nextAiring(it);
   const seasons=(it.seasons||[]).slice().sort((a,b)=>snum(a.n)-snum(b.n));
@@ -549,19 +587,22 @@ function showDetail(id,it,enter){
   let b=matchBanner(it)+heroBlock(it,[it.year?'<span class="mono">'+esc(it.year)+'</span>':"",esc(it.by),esc(it.genre),it.status?esc(it.status):""].filter(Boolean).join(" · "))+extraFacts(it);
   b+='<p class="label">Shelf</p>'+chips(SHOW_SHELVES,it.shelf,null,"setShelf")+scaleRow(it);
   b+='<div class="progress"><div class="top"><span><b>'+p.w+'</b> of '+p.total+' aired episodes</span><span class="mono">'+(p.total?Math.round(p.w/p.total*100):0)+'%</span></div><div class="bar"><span style="width:'+(p.total?p.w/p.total*100:0)+'%"></span></div></div>';
-  if(n)b+='<div class="card nextup"><div><p class="label" style="margin-bottom:4px">Next up</p><div class="code">'+code(n.s,n.e.n)+'</div><div class="ep">'+esc(n.e.t||"Episode "+n.e.n)+'</div></div><button class="btn primary" type="button" data-a="toggleEp" data-s="'+n.s+'" data-e="'+n.e.n+'">Watched</button></div>';
+  if(it.rewatch){const rp=rewatchProgress(it);
+    b+='<div class="card rewatch-card"><div class="rc-top"><span class="rw">Rewatching</span><span class="mono">'+rp.w+' of '+rp.total+' · since '+esc(fmtDate(it.rewatch.from))+'</span><button class="link" type="button" data-a="stopRewatch">Stop rewatch</button></div><div class="bar"><span style="width:'+(rp.total?rp.w/rp.total*100:0)+'%"></span></div></div>'}
+  if(n)b+='<div class="card nextup"><div><p class="label" style="margin-bottom:4px">'+(it.rewatch?"Next to rewatch":"Next up")+'</p><div class="code">'+code(n.s,n.e.n)+'</div><div class="ep">'+esc(n.e.t||"Episode "+n.e.n)+'</div></div><button class="btn primary" type="button" data-a="watchNext" data-id="'+esc(id)+'">Watched</button></div>';
   else if(p.total)b+='<div class="card nextup"><div><p class="label" style="margin-bottom:4px">All caught up</p><div class="ep">'+(na?"Next episode airs "+esc(fmtDate(na.e.a)):ended(it)?"You've seen every episode.":"No new episodes announced yet.")+'</div></div></div>';
   if(seasons.length)b+='<div class="seasons" data-scroll="seasons">'+seasons.map(s=>{const ae=s.eps.filter(aired);const w=ae.filter(isW).length;return'<button class="spill'+(ae.length&&w===ae.length?" done":"")+'" type="button" data-a="season" data-v="'+s.n+'" aria-pressed="'+(s.n===S.season)+'"><b>'+sname(s.n)+'</b><span>'+w+'/'+ae.length+(ae.length<s.eps.length?" +"+(s.eps.length-ae.length):"")+'</span></button>'}).join("")+'</div>';
   if(cs){
     const ae=cs.eps.filter(aired);const w=ae.filter(isW).length,all=ae.length>0&&w===ae.length;
-    b+='<div class="season-head"><h3>'+sname(cs.n)+'</h3>'+(all?'<button class="link" type="button" data-a="unmarkSeason">Unmark season</button>':ae.length?'<button class="link" type="button" data-a="markAsk">Mark season watched</button>':"")+'</div>';
+    b+='<div class="season-head"><h3>'+sname(cs.n)+'</h3>'+(all?'<span class="sh-links"><button class="link" type="button" data-a="rwSeasonAsk">Rewatched season</button><button class="link" type="button" data-a="unmarkSeason">Unmark season</button></span>':ae.length?'<button class="link" type="button" data-a="markAsk">Mark season watched</button>':"")+'</div>';
+    if(S.rwSeasonAsk===cs.n)b+='<div class="choice"><span>When did you rewatch it?</span><button class="btn primary" type="button" data-a="rwSeason" data-v="today">Today</button><button class="btn ghost" type="button" data-a="rwSeason" data-v="nodate">Date unknown</button></div>';
     if(S.markAsk===cs.n)b+='<div class="choice"><span>When did you watch it?</span><button class="btn primary" type="button" data-a="markSeason" data-v="today">Today</button><button class="btn ghost" type="button" data-a="markSeason" data-v="nodate">Before, no date</button></div>';
     b+='<ul class="eps">'+cs.eps.slice().sort((a,b)=>a.n-b.n).map(e=>{const wd=isW(e),fut=!aired(e);
       return'<li class="ep'+(wd?" w":"")+(fut?" future":"")+'"><button class="tick" type="button" data-a="toggleEp" data-s="'+cs.n+'" data-e="'+e.n+'" aria-pressed="'+wd+'" aria-label="'+(wd?"Unmark ":"Mark ")+code(cs.n,e.n)+'" '+(fut?"disabled":"")+'>'+ICON.check+'</button>'+
-        '<span class="et"><span class="code">E'+pad(e.n)+(e.a&&!fut?" · "+esc(fmtDate(e.a)):"")+'</span><span class="name">'+esc(e.t||"Episode "+e.n)+'</span>'+((e.s||(e.rw&&e.rw.length))?'<span class="epx">'+(e.s?e.s+'/10':"")+(e.s&&e.rw&&e.rw.length?" · ":"")+(e.rw&&e.rw.length?"rewatched "+e.rw.map(r=>fmtDate(r.d)).join(", "):"")+'</span>':"")+'</span>'+
-        (fut?'<span class="airs">Airs '+esc(fmtDate(e.a))+'</span>':wd?'<label class="when"><span>'+(e.w?esc(fmtDate(e.w)):"Seen")+'</span><input type="date" aria-label="Date watched for '+code(cs.n,e.n)+'" data-c="epDate" data-s="'+cs.n+'" data-e="'+e.n+'" value="'+esc(e.w||"")+'" max="'+today()+'"></label>':"<span></span>")+'</li>'}).join("")+'</ul>';
+        '<button type="button" class="et" data-a="epMenu" data-s="'+cs.n+'" data-e="'+e.n+'" '+(fut?"disabled":"")+'><span class="code">E'+pad(e.n)+(e.a&&!fut?" · "+esc(fmtDate(e.a)):"")+'</span><span class="name">'+esc(e.t||"Episode "+e.n)+'</span>'+((e.s||(e.rw&&e.rw.length))?'<span class="epx">'+(e.s?e.s+'/10':"")+(e.s&&e.rw&&e.rw.length?" · ":"")+(e.rw&&e.rw.length?"rewatched "+e.rw.map(r=>r.d?fmtDate(r.d):"date unknown").join(", "):"")+'</span>':"")+'</button>'+
+        (fut?'<span class="airs">Airs '+esc(fmtDate(e.a))+'</span>':wd?'<label class="when"><span>'+(e.w?esc(fmtDate(e.w)):"Seen")+'</span><input type="date" aria-label="Date watched for '+code(cs.n,e.n)+'" data-c="epDate" data-s="'+cs.n+'" data-e="'+e.n+'" value="'+esc(e.w||"")+'" max="'+today()+'"></label>':"<span></span>")+'</li>'+(S.epMenu===cs.n+"x"+e.n?epMenuHtml(cs.n,e):"")}).join("")+'</ul>';
   }else b+='<div class="card"><p style="margin:0;color:var(--muted)">No episodes listed yet.</p></div>';
-  b+='<div class="tools"><button class="btn ghost" type="button" data-a="refreshShow" '+(S.refreshing?"disabled":"")+'>'+(S.refreshing?'<span class="spin"></span>Checking…':"Check for new episodes")+'</button><button class="btn ghost" type="button" data-a="openPicker">Change cover</button></div>';
+  b+='<div class="tools">'+(!it.rewatch&&p.w>0?'<button class="btn ghost" type="button" data-a="startRewatch">Start a rewatch</button>':"")+'<button class="btn ghost" type="button" data-a="refreshShow" '+(S.refreshing?"disabled":"")+'>'+(S.refreshing?'<span class="spin"></span>Checking…':"Check for new episodes")+'</button><button class="btn ghost" type="button" data-a="openPicker">Change cover</button></div>';
   b+=dangerZone(it);
   return sheetShell(b,{enter,wash:washFor(it),label:it.title});
 }
@@ -577,6 +618,9 @@ function extraFacts(it){
 }
 function movieDetail(id,it,enter){
   let b=matchBanner(it)+heroBlock(it,[it.year?'<span class="mono">'+esc(it.year)+'</span>':"",it.by?"Directed by "+esc(it.by):"",it.runtime?'<span class="mono">'+it.runtime+' min</span>':"",esc(it.genre)].filter(Boolean).join(" · "))+extraFacts(it);
+  const has=watchesOf(it).length>0;
+  b+='<div class="quick">'+(has?'<button class="btn primary" type="button" data-a="movieQuick" data-v="again">'+ICON.rewatch.replace("<svg",'<svg width="16" height="16"')+'Watched again today</button>'
+    :'<button class="btn primary" type="button" data-a="movieQuick" data-v="today">'+ICON.check.replace("<svg",'<svg width="16" height="16"')+'Watched today</button><button class="btn ghost" type="button" data-a="movieQuick" data-v="unknown">Seen it, date unknown</button>')+'</div>';
   b+='<p class="label">Shelf</p>'+chips(MOVIE_SHELVES,it.shelf,null,"setShelf")+scaleRow(it);
   const ws=watchesOf(it).map((w,i)=>[w,i]).sort((a,b)=>(b[0].d||"0").localeCompare(a[0].d||"0")||(b[0].o||0)-(a[0].o||0));
   const cl=countLine(it);
@@ -585,11 +629,11 @@ function movieDetail(id,it,enter){
     (w.s?' <span class="score">'+w.s+'<small>/10</small></span>':"")+'</span>'+
     '<button type="button" class="conf-btn" data-a="cycleConf" data-v="'+i+'" aria-label="Confidence: '+(w.c||"confirmed")+'. Tap to change">'+(confBadge(w.c)||'<span class="conf conf-confirmed">Confirmed</span>')+'</button>'+
     '<button type="button" class="wx" data-a="removeWatch" data-v="'+i+'" aria-label="Remove this watch">'+ICON.x.replace("<svg",'<svg width="14" height="14"')+'</button></li>').join("")+'</ul><p class="hint">Tap a tag to change how sure you are.</p>':'<p class="hint" style="margin-bottom:10px">No watches logged yet.</p>');
-  b+='<div class="logbox"><p class="label" style="margin:0">Log a watch</p>'+
+  b+='<div class="logbox"><p class="label" style="margin:0">'+(has?"Add another viewing":"Log a watch")+'</p>'+
     '<label class="toggle-line"><input id="log-nodate" type="checkbox" data-c="logNoDate" '+(S.logNoDate?"checked":"")+'>I don\'t know the date</label>'+
     (S.logNoDate?'<p class="hint" style="margin:0">It goes to the top of your Undated list, where you can reorder it.</p>':'<input id="watch-date" type="date" value="'+today()+'" max="'+today()+'" aria-label="Date watched">')+
     '<div class="seg sm" role="group" aria-label="How sure are you">'+CONF.map(([k,l])=>'<button type="button" data-a="logConf" data-v="'+k+'" aria-pressed="'+(S.logConf===k)+'">'+l+'</button>').join("")+'</div>'+
-    '<button class="btn primary" type="button" data-a="logWatch">Log watch</button></div>';
+    '<button class="btn primary" type="button" data-a="logWatch">'+(has?"Add viewing":"Log watch")+'</button></div>';
   b+='<p class="label">Notes</p><textarea id="notes" data-c="notes" placeholder="What stayed with you?">'+esc(it.notes||"")+'</textarea>';
   b+=dangerZone(it);
   return sheetShell(b,{enter,wash:washFor(it),label:it.title});
@@ -797,6 +841,7 @@ function mergeDocs(existing,incoming){
   return m;
 }
 function settleShowShelf(doc){
+  if(doc.rewatch){doc.shelf="watching";return}
   const p=progress(doc);
   if(p.total&&p.w>=p.total)doc.shelf=ended(doc)?"completed":(doc.shelf==="stopped"?"stopped":"watching");
   else if(doc.shelf==="completed")doc.shelf="watching";
@@ -1029,7 +1074,7 @@ async function relinkTo(oldId,kind,tmdbId){
 }
 
 /* ---------- actions ---------- */
-function openItem(id){S.openId=id;S.season=null;S.confirm=null;S.markAsk=null;S.logNoDate=false;S.logConf="confirmed";render();
+function openItem(id){S.epMenu=null;S.rwSeasonAsk=null;S.openId=id;S.season=null;S.confirm=null;S.markAsk=null;S.logNoDate=false;S.logConf="confirmed";render();
   const it=S.items.get(id);if(it&&it.kind==="show"&&!ended(it)&&(!it.refreshedAt||Date.now()-it.refreshedAt>2*864e5))refreshShow(id,true)}
 const A={
   authMode:d=>{S.authMode=d.v;S.authErr="";S.authMsg="";render()},
@@ -1050,9 +1095,35 @@ const A={
   pick:d=>pickResult(+d.v),
   openPicker:()=>{const it=S.items.get(S.openId);if(it&&!it.tmdb)A.openRelink();else openPicker()},
   setPoster:d=>{const P=S.picker;const p=P&&P.posters[+d.v];if(!p)return;const it=clone(P.id);it.poster=p.file_path;S.picker=null;save(P.id,it);toast("Cover updated")},
-  watchNext:d=>{const it=S.items.get(d.id);const n=it&&nextUp(it);if(n){toggleEp(d.id,n.s,n.e.n);if((S.items.get(d.id)||{}).shelf!=="completed")toast("Marked "+code(n.s,n.e.n)+" watched",{label:"Undo",fn:()=>setEps(d.id,[[n.s,n.e.n]],null)})}},
+  watchNext:d=>{const id=d.id;const it=S.items.get(id);const n=it&&nextUp(it);if(!n)return;
+    const dt=today();const kind=watchEpisode(id,n.s,n.e.n,dt);
+    toast((kind==="re"?"Rewatched ":"Watched ")+code(n.s,n.e.n),{label:"Undo",fn:()=>undoEpisode(id,n.s,n.e.n,kind,dt)})},
+  epMenu:d=>{const k=d.s+"x"+d.e;S.epMenu=S.epMenu===k?null:k;render()},
+  epMenuClose:()=>{S.epMenu=null;render()},
+  epUnknown:()=>{const{s,e}=epFromMenu();setEps(S.openId,[[s,e]],"")},
+  epUnwatch:()=>{const id=S.openId;const{s,e}=epFromMenu();const it=clone(id);const ep=findEp(it,s,e);if(!ep)return;const prev=JSON.parse(JSON.stringify(ep));
+    ep.w=null;delete ep.c;delete ep.rw;autoShelf(it,true);S.epMenu=null;save(id,it);
+    toast(code(s,e)+" marked not watched",{label:"Undo",fn:()=>{const c=clone(id);const x=findEp(c,s,e);if(x){Object.assign(x,prev);save(id,c)}}})},
+  epRwToday:()=>{const{s,e}=epFromMenu();watchEpisode(S.openId,s,e,today())},
+  epRwUnknown:()=>{const id=S.openId;const{s,e}=epFromMenu();const it=clone(id);const ep=findEp(it,s,e);if(!ep)return;ep.rw=(ep.rw||[]).concat({d:"",c:"guess"});save(id,it)},
+  epRwDel:d=>{const id=S.openId;const{s,e}=epFromMenu();const it=clone(id);const ep=findEp(it,s,e);if(!ep||!ep.rw)return;ep.rw.splice(+d.i,1);if(!ep.rw.length)delete ep.rw;save(id,it)},
+  epWatchToday:()=>{const{s,e}=epFromMenu();S.epMenu=null;watchEpisode(S.openId,s,e,today())},
+  epSeenUnknown:()=>{const{s,e}=epFromMenu();S.epMenu=null;setEps(S.openId,[[s,e]],"")},
+  rwSeasonAsk:()=>{S.rwSeasonAsk=S.rwSeasonAsk===S.season?null:S.season;render()},
+  rwSeason:d=>{const id=S.openId;const it=clone(id);const se=it.seasons.find(x=>x.n===S.season);S.rwSeasonAsk=null;if(!se)return;
+    const entry=d.v==="today"?{d:today(),c:"confirmed"}:{d:"",c:"guess"};
+    se.eps.filter(aired).forEach(e=>{if(isW(e))e.rw=(e.rw||[]).concat(Object.assign({},entry));else{e.w=entry.d;e.c=entry.c}});
+    save(id,it);toast(sname(se.n)+" logged as rewatched")},
+  startRewatch:()=>{const id=S.openId;const it=clone(id);it.rewatch={from:today()};it.shelf="watching";S.season=null;save(id,it);toast("Rewatch started. It's in Up next.")},
+  stopRewatch:()=>{const id=S.openId;const it=clone(id);const was=it.rewatch;delete it.rewatch;settleShowShelf(it);autoShelf(it,true);save(id,it);
+    toast("Rewatch stopped. Episodes you rewatched stay logged.",{label:"Undo",fn:()=>{const c=clone(id);c.rewatch=was;c.shelf="watching";save(id,c)}})},
+  movieQuick:d=>{const id=S.openId;const before=clone(id);const it=clone(id);it.watches=watchesOf(it);
+    if(d.v==="unknown"){let max=0;for(const[,x]of S.items)if(x.kind==="movie")watchesOf(x).forEach(w=>{if(!w.d&&(w.o||0)>max)max=w.o});it.watches.push({d:"",c:"confirmed",o:max+1})}
+    else it.watches.push(Object.assign({d:today(),c:"confirmed"},d.v==="again"?{r:true}:{}));
+    it.shelf="watched";save(id,it);
+    toast(d.v==="again"?"Rewatch logged for today":d.v==="today"?"Watched today":"Marked as seen",{label:"Undo",fn:()=>save(id,before)})},
   toggleEp:d=>toggleEp(S.openId,+d.s,+d.e),
-  season:d=>{S.season=+d.v;S.markAsk=null;render()},
+  season:d=>{S.season=+d.v;S.markAsk=null;S.rwSeasonAsk=null;S.epMenu=null;render()},
   markAsk:()=>{S.markAsk=S.season;render()},
   markSeason:d=>{const it=S.items.get(S.openId);const s=it.seasons.find(x=>x.n===S.season);S.markAsk=null;setEps(S.openId,s.eps.filter(e=>aired(e)&&!isW(e)).map(e=>[s.n,e.n]),d.v==="today"?today():"")},
   unmarkSeason:()=>{const it=S.items.get(S.openId);const s=it.seasons.find(x=>x.n===S.season);const prev=s.eps.map(e=>[e.n,e.w,e.c]);const id=S.openId,sn=s.n;
@@ -1102,6 +1173,8 @@ document.addEventListener("input",e=>{
 });
 document.addEventListener("change",e=>{
   const el=e.target;const c=el.dataset&&el.dataset.c;if(!c)return;
+  if(c==="epRwDate"||c==="epWatchDate"){const v=el.value;if(!v)return;if(v>today()){toast("That date is in the future.");return}
+    const{s,e}=epFromMenu();if(c==="epWatchDate")S.epMenu=null;watchEpisode(S.openId,s,e,v);return}
   if(c==="epDate"){const id=S.openId;const it=clone(id);const ep=findEp(it,+el.dataset.s,+el.dataset.e);if(ep){ep.w=el.value||"";save(id,it)}}
   else if(c==="notes"){const it=clone(S.openId);if((it.notes||"")!==el.value){it.notes=el.value.slice(0,5000);save(S.openId,it)}}
   else if(c==="logNoDate"){S.logNoDate=el.checked;render()}

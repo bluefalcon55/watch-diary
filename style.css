@@ -415,3 +415,21 @@ textarea{width:100%;box-sizing:border-box;min-height:96px;border:1px solid var(-
 .row-caught{background:var(--bg);border-style:dashed}
 .row-caught .cover{opacity:.85}
 .row-caught .next.caught{color:var(--s-completed);font-weight:600}
+
+/* episode menu, rewatch */
+.ep .et{all:unset;cursor:pointer;min-width:0;display:flex;flex-direction:column}
+.ep .et:focus-visible{outline:2px solid var(--accent);outline-offset:2px;border-radius:4px}
+.ep-menu{list-style:none;background:var(--accent-soft);border-top:1px solid #CBD3FB;padding:10px 12px 12px 54px;display:flex;flex-direction:column;gap:8px}
+.em-row{display:flex;align-items:center;gap:10px;flex-wrap:wrap;font-size:13.5px}
+.em-k{font:500 10.5px var(--f-mono);letter-spacing:.08em;text-transform:uppercase;color:var(--muted);min-width:84px}
+.em-row .when{background:var(--surface)}
+.em-actions{display:flex;flex-wrap:wrap;gap:8px;align-items:center;margin-top:2px}
+.em-actions .btn{font-size:13px;padding:7px 11px}
+.date-btn{position:relative;cursor:pointer}
+.date-btn input{position:absolute;inset:0;opacity:0;width:100%;height:100%;cursor:pointer}
+.sh-links{display:flex;gap:14px;flex-wrap:wrap}
+.rewatch-card{display:flex;flex-direction:column;gap:8px;margin-bottom:12px;background:var(--accent-soft);border-color:#CBD3FB}
+.rc-top{display:flex;align-items:center;gap:10px;flex-wrap:wrap;font-size:13px}
+.rc-top .link{margin-left:auto}
+.quick{display:flex;flex-wrap:wrap;gap:8px;margin:-4px 0 16px}
+.quick .btn{gap:6px}
