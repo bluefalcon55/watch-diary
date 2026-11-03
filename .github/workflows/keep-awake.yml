@@ -1,0 +1,40 @@
+# Keeps the free Supabase project from pausing (it pauses after ~7 quiet days).
+# Every 3 days GitHub runs this: one tiny read request to the database.
+# The URL and publishable key are the same public values the app itself uses;
+# row-level security means this request can't see anyone's data.
+name: Keep database awake
+
+on:
+  schedule:
+    - cron: "17 14 */3 * *"   # every 3 days, ~9-10am New York time
+  workflow_dispatch: {}        # lets it be run by hand from the Actions tab
+
+permissions:
+  contents: write              # only for the keep-alive commit below
+
+jobs:
+  ping:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Ping the database
+        run: |
+          curl -fsS --retry 3 --retry-delay 20 \
+            "https://oxubmwphdvrlczsjuksx.supabase.co/rest/v1/items?select=id&limit=1" \
+            -H "apikey: sb_publishable_dzId3QzkMOJUqs8z5Yq_EA_hUNNDD08" \
+            -H "Authorization: Bearer sb_publishable_dzId3QzkMOJUqs8z5Yq_EA_hUNNDD08" \
+            -o /dev/null -w "Database answered: HTTP %{http_code}\n"
+
+      # GitHub switches off scheduled jobs in a repository with no changes for 60 days.
+      # If nothing has changed in 50 days, record an empty "still here" update.
+      - uses: actions/checkout@v4
+      - name: Keep this schedule switched on
+        run: |
+          last=$(git log -1 --format=%ct)
+          age=$(( ( $(date +%s) - last ) / 86400 ))
+          echo "Last change was $age days ago"
+          if [ "$age" -ge 50 ]; then
+            git config user.name "github-actions[bot]"
+            git config user.email "41898283+github-actions[bot]@users.noreply.github.com"
+            git commit --allow-empty -m "Keep the database check-in switched on"
+            git push
+          fi
