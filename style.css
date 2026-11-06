@@ -438,3 +438,12 @@ textarea{width:100%;box-sizing:border-box;min-height:96px;border:1px solid var(-
 .em-or{font-size:12px;color:var(--muted)}
 .ep-menu .em-row{row-gap:8px}
 button.when{cursor:pointer}
+
+/* theater tag */
+.th-tag{display:inline-flex;align-items:center;gap:3px;font:600 9.5px/1 var(--f-mono);letter-spacing:.08em;text-transform:uppercase;color:#7A1F35;background:#FBE3E9;border-radius:5px;padding:3px 5px 3px 4px;flex:none}
+.th-tag svg{width:12px;height:12px}
+.th-tag.sm{padding:2px 3px;vertical-align:-2px}
+.th-tag.sm svg{width:11px;height:11px}
+.th-btn{width:32px;height:30px;border-radius:8px;display:grid;place-items:center;color:#C9CDDD;border:1px solid var(--line);background:var(--surface);flex:none}
+.th-btn svg{width:17px;height:17px}
+.th-btn[aria-pressed="true"]{color:#7A1F35;background:#FBE3E9;border-color:#F2C2CF}
