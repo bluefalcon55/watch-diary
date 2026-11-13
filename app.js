@@ -293,7 +293,7 @@ function autoShelf(it,silent){
   const p=progress(it);
   if(p.total&&p.w===p.total){
     if(ended(it)&&!nextAiring(it)){if(it.shelf!=="completed"){it.shelf="completed";if(!silent)toast("Finished. Moved to Completed.")}}
-    else if(it.shelf==="notstarted"||it.shelf==="completed"){it.shelf="watching"}
+    else if(it.shelf==="notstarted"){it.shelf="watching"}
   }else if(p.w>0&&(it.shelf==="notstarted"||it.shelf==="completed"))it.shelf="watching";
 }
 function setEps(id,pairs,val){const it=clone(id);pairs.forEach(([s,e])=>{const ep=findEp(it,s,e);if(ep){ep.w=val;if(val===null)delete ep.c}});autoShelf(it);save(id,it)}
