@@ -36,7 +36,7 @@ const ICON={
 
 /* ---------- state ---------- */
 const S={user:null,authReady:false,authMode:"signin",authMsg:"",authErr:"",items:new Map(),loaded:false,
-  tab:"shows",showShelf:"watching",movieShelf:"watched",q:"",openId:null,season:null,diaryYear:new Date().getFullYear(),
+  tab:"shows",showShelf:"watching",movieShelf:"watched",q:"",openId:null,season:null,diaryYear:new Date().getFullYear(),diaryTo:new Date().getFullYear(),
   diaryFilter:"all",diaryView:"dated",add:null,picker:null,settings:false,confirm:null,markAsk:null,refreshing:false,
   logNoDate:false,logConf:"confirmed",renderPending:false,lastSheet:"",offline:false};
 try{const p=JSON.parse(localStorage.getItem("wd-prefs")||"{}");["tab","showShelf","movieShelf","diaryView","sortBy"].forEach(k=>{if(p[k])S[k]=p[k]})}catch(e){}
@@ -518,16 +518,26 @@ function diaryView(){
   let h='<div class="head"><h1>Diary</h1>'+(S.diaryView==="dated"?yearBar():"")+'</div>';
   h+='<div class="seg" role="group" aria-label="Diary view"><button type="button" data-a="dview" data-v="dated" aria-pressed="'+(S.diaryView==="dated")+'">By date</button><button type="button" data-a="dview" data-v="undated" aria-pressed="'+(S.diaryView==="undated")+'">Undated'+(und.length?" ("+und.length+")":"")+'</button></div>';
   if(S.diaryView==="undated")return h+undatedView(und);
-  const all=diaryEntries();const Y=S.diaryYear;
-  const inYear=all.filter(x=>+x.date.slice(0,4)===Y&&(S.diaryFilter==="all"||x.kind===S.diaryFilter));
+  const all=diaryEntries();
   h+=chips([["all","Everything"],["movie","Movies"],["show","Episodes"]],S.diaryFilter,null,"dfilter");
+  if(!all.length&&!und.length)return h+'<div class="empty"><p>Every movie and episode you log with a date shows up here, month by month.</p></div>';
+  /* Continuous scroll: the chosen year, then each earlier year as you reach the bottom. */
+  const minY=diaryMinYear(),to=Math.max(minY,Math.min(S.diaryTo,S.diaryYear));
+  for(let y=S.diaryYear;y>=to;y--)h+=diaryYearHtml(y,all,und,y===S.diaryYear);
+  if(to>minY)h+='<button class="btn ghost dmore" type="button" data-a="dmore">'+ICON.back+'Keep going to '+(to-1)+'</button>';
+  return h;
+}
+function diaryYearHtml(Y,all,und,first){
+  let h="";
+  const inYear=all.filter(x=>+x.date.slice(0,4)===Y&&(S.diaryFilter==="all"||x.kind===S.diaryFilter));
   const films=inYear.filter(x=>x.kind==="movie").length,eps=inYear.filter(x=>x.kind==="show").length,shows=new Set(inYear.filter(x=>x.kind==="show").map(x=>x.id)).size;
+  if(!first)h+='<h2 class="dyear-head" id="dy-'+Y+'">'+Y+'</h2>';
   h+='<div class="yearstats"><div><b>'+films+'</b><span>Films</span></div><div><b>'+eps+'</b><span>Episodes</span></div><div><b>'+shows+'</b><span>Shows</span></div></div>';
-  const roughly=S.diaryFilter==="show"?[]:undatedEntries().filter(x=>{const a=(x.lo||x.hi),b=(x.hi||x.lo);return a&&+a.slice(0,4)===Y&&+b.slice(0,4)===Y});
+  const roughly=S.diaryFilter==="show"?[]:und.filter(x=>{const a=(x.lo||x.hi),b=(x.hi||x.lo);return a&&+a.slice(0,4)===Y&&+b.slice(0,4)===Y});
   const roughHtml=()=>{if(!roughly.length)return"";let r='<section class="dmonth"><h2 class="dmonth-head">Sometime in '+Y+'</h2><ul class="dlist">';
     roughly.forEach(x=>{const it=S.items.get(x.id);if(!it)return;r+=diaryRow(it,x.id,"","unsure undated",scorePill(it)+(lovedOf(it)?'<span class="dheart">♥</span>':"")+'<span class="dsub">'+esc(windowText(x.lo,x.hi))+'</span>'+confBadge(x.c))});return r+'</ul></section>'};
   if(!inYear.length&&roughly.length)return h+roughHtml();
-  if(!inYear.length)return h+'<div class="empty"><p>'+(all.length?"Nothing logged in "+Y+".":"Every movie and episode you log with a date shows up here, month by month.")+'</p></div>';
+  if(!inYear.length)return h+'<div class="empty"><p>Nothing logged in '+Y+'.</p></div>';
   for(let m=11;m>=0;m--){
     const key=Y+"-"+pad(m+1);const me=inYear.filter(x=>x.date.startsWith(key));if(!me.length)continue;
     const groups=[];me.forEach(x=>{let g=groups.find(g=>g.date===x.date&&g.id===x.id);if(!g){g={date:x.date,id:x.id,kind:x.kind,c:x.c,eps:[],re:false};groups.push(g)}if(x.re)g.re=true;if(x.th)g.th=true;if(x.c!=="confirmed"&&g.c==="confirmed")g.c=x.c;if(x.kind==="show")g.eps.push(x)});
@@ -546,8 +556,9 @@ function diaryView(){
   }
   return h+roughHtml();
 }
+function diaryMinYear(){const years=diaryEntries().map(x=>+x.date.slice(0,4)).concat(undatedEntries().map(x=>+(x.hi||x.lo||"").slice(0,4))).filter(Boolean);return years.reduce((a,b)=>Math.min(a,b),new Date().getFullYear())}
 function yearBar(){
-  const nowY=new Date().getFullYear();const years=diaryEntries().map(x=>+x.date.slice(0,4)).concat(undatedEntries().map(x=>+(x.hi||x.lo||"").slice(0,4))).filter(Boolean);const minY=Math.min(nowY,...years);const Y=S.diaryYear;
+  const nowY=new Date().getFullYear();const minY=diaryMinYear();const Y=S.diaryYear;
   return'<div class="yearbar"><button type="button" data-a="year" data-v="-1" aria-label="Previous year" '+(Y<=minY?"disabled":"")+'>'+ICON.back+'</button><span class="mono" style="font-weight:500;min-width:3.2em;text-align:center">'+Y+'</span><button type="button" data-a="year" data-v="1" aria-label="Next year" '+(Y>=nowY?"disabled":"")+'>'+ICON.next+'</button></div>';
 }
 function undatedView(und){
@@ -1093,7 +1104,16 @@ function render(){
   document.documentElement.classList.toggle("locked",!!key);
   document.querySelectorAll("[data-scroll]").forEach(el=>{const v=scroll[el.dataset.scroll];if(v){el.scrollTop=v[0];el.scrollLeft=v[1]}});
   if(key==="add"&&reopened){const q=document.getElementById("q");if(q&&!S.add.q)setTimeout(()=>q.focus(),60)}
+  watchDiaryMore();
   if(key.startsWith("item:")&&!scroll.seasons){const sp=layer.querySelector('.spill[aria-pressed="true"]');const box=layer.querySelector(".seasons");if(sp&&box)box.scrollLeft=Math.max(0,sp.offsetLeft-box.clientWidth/2+sp.clientWidth/2)}
+}
+/* Load the next earlier year when the "Keep going" button nears the screen. */
+let dmoreObs=null;
+function watchDiaryMore(){
+  if(dmoreObs){dmoreObs.disconnect();dmoreObs=null}
+  const b=document.querySelector(".dmore");if(!b||!("IntersectionObserver"in window))return;
+  dmoreObs=new IntersectionObserver(es=>{if(es.some(e=>e.isIntersecting)){dmoreObs.disconnect();dmoreObs=null;setTimeout(()=>{if(document.querySelector(".dmore")){S.diaryTo=Math.min(S.diaryTo,S.diaryYear)-1;render()}},0)}},{rootMargin:"0px 0px 800px 0px"});
+  dmoreObs.observe(b);
 }
 function renderLib(){const el=document.getElementById("lib");if(!el)return render();if(!S.q&&((S.tab==="shows"&&S.showShelf==="fav")||(S.tab==="movies"&&S.movieShelf==="fav")))return render();el.innerHTML=S.tab==="shows"?showsBody():moviesBody()}
 document.addEventListener("focusout",()=>setTimeout(()=>{if(S.renderPending&&!isTyping())render()},0));
@@ -1443,9 +1463,10 @@ const A={
   showShelf:d=>{S.showShelf=d.v;S.favEdit=false;savePrefs();render()},
   movieShelf:d=>{S.movieShelf=d.v;S.favEdit=false;savePrefs();render()},
   favEdit:()=>{S.favEdit=!S.favEdit;render()},
-  dfilter:d=>{S.diaryFilter=d.v;render()},
+  dfilter:d=>{S.diaryFilter=d.v;S.diaryTo=S.diaryYear;render()},
   dview:d=>{S.diaryView=d.v;savePrefs();render()},
-  year:d=>{S.diaryYear+=+d.v;render()},
+  year:d=>{S.diaryYear+=+d.v;S.diaryTo=S.diaryYear;window.scrollTo(0,0);render()},
+  dmore:()=>{S.diaryTo=Math.min(S.diaryTo,S.diaryYear)-1;render()},
   open:d=>{S.settings=false;openItem(d.id)},
   close:()=>{if(S.settings){S.settings=false;if(S.imp&&S.imp.phase!=="running"&&S.imp.phase!=="ready")S.imp=null}else if(S.picker)S.picker=null;else if(S.add)S.add=null;else S.openId=null;render()},
   openAdd:()=>{S.add={q:"",phase:"idle",results:[]};render()},

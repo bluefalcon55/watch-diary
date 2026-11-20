@@ -242,6 +242,9 @@ textarea{width:100%;box-sizing:border-box;min-height:96px;border:1px solid var(-
 .yearbar button{width:34px;height:34px;border-radius:50%;display:grid;place-items:center;border:1px solid var(--line);background:var(--surface)}
 .yearbar button:disabled{opacity:.35}
 .yearbar svg{width:16px;height:16px}
+.dyear-head{font:800 30px/1 var(--f-display);letter-spacing:-.02em;margin:34px 0 10px;padding-top:18px;border-top:2px solid var(--line)}
+.dmore{display:flex;align-items:center;gap:6px;margin:22px auto 8px}
+.dmore svg{width:16px;height:16px}
 .yearstats{display:flex;gap:18px;flex-wrap:wrap;margin:0 0 14px}
 .yearstats div{display:flex;flex-direction:column}
 .yearstats b{font:800 26px/1 var(--f-display);letter-spacing:-.02em;font-variant-numeric:tabular-nums}
