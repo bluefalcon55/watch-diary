@@ -10,6 +10,7 @@ import json
 import re
 import sys
 import time
+import urllib.error
 import urllib.request
 from zoneinfo import ZoneInfo
 
@@ -28,19 +29,34 @@ def spans(s):
     return [t for t in (text(x) for x in SPAN.findall(s or "")) if t]
 
 
+HEADERS = {
+    "User-Agent": UA,
+    "Accept": "text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8",
+    "Accept-Language": "en-US,en;q=0.9",
+}
+
+
 def fetch(day):
-    req = urllib.request.Request(f"{BASE}/listings/{day}", headers={"User-Agent": UA, "Accept": "text/html"})
-    for attempt in range(3):
+    req = urllib.request.Request(f"{BASE}/listings/{day}", headers=HEADERS)
+    err = None
+    for attempt in range(2):
+        t0 = time.time()
         try:
-            with urllib.request.urlopen(req, timeout=40) as r:
+            with urllib.request.urlopen(req, timeout=20) as r:
                 page = r.read().decode("utf-8", "replace")
             m = PRELOAD.search(page)
             if not m:
-                raise ValueError("listings data not found on the page")
+                raise ValueError(f"listings data not found on the page ({len(page)} bytes: {page[:120]!r})")
+            print(f"{day}: ok in {time.time() - t0:.1f}s", flush=True)
             return json.loads(m.group(1))
+        except urllib.error.HTTPError as e:
+            err = f"HTTP {e.code} {e.headers.get('server', '')} {e.read(200)!r}"
+            if e.code in (403, 429, 503):
+                break  # blocked; retrying won't help
         except Exception as e:  # noqa: BLE001
-            err = e
-            time.sleep(5 * (attempt + 1))
+            err = f"{type(e).__name__}: {e}"
+        print(f"{day}: attempt {attempt + 1} failed after {time.time() - t0:.1f}s: {err}", flush=True)
+        time.sleep(3)
     raise RuntimeError(f"{day}: {err}")
 
 
@@ -89,8 +105,10 @@ def main():
         try:
             data = fetch(day)
         except Exception as e:  # noqa: BLE001
-            print("skip", e)
+            print("skip", e, flush=True)
             failed.append(day)
+            if not days and len(failed) >= 2:
+                break  # blocked from the start; don't spend minutes retrying every day
             continue
         days.append(day)
         by_nid = {}
