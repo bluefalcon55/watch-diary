@@ -631,7 +631,7 @@ function showDetail(id,it,enter){
   const seasons=(it.seasons||[]).slice().sort((a,b)=>snum(a.n)-snum(b.n));
   if(S.season==null||!seasons.some(s=>s.n===S.season))S.season=n?n.s:(seasons[0]?seasons[0].n:null);
   const cs=seasons.find(s=>s.n===S.season);
-  let b=matchBanner(it)+heroBlock(it,[it.year?'<span class="mono">'+esc(it.year)+'</span>':"",esc(it.by),esc(it.genre),it.status?esc(it.status):""].filter(Boolean).join(" · "))+extraFacts(it);
+  let b=matchBanner(it)+heroBlock(it,[it.year?'<span class="mono">'+esc(it.year)+'</span>':"",esc(it.by),esc(it.genre),it.status?esc(it.status):""].filter(Boolean).join(" · "))+extraFacts(it)+whereToWatch(id,it);
   b+='<p class="label">Shelf</p>'+chips(SHOW_SHELVES,it.shelf,null,"setShelf")+favButton(it)+scaleRow(it);
   b+='<div class="progress"><div class="top"><span><b>'+p.w+'</b> of '+p.total+' aired episodes</span><span class="mono">'+(p.total?Math.round(p.w/p.total*100):0)+'%</span></div><div class="bar"><span style="width:'+(p.total?p.w/p.total*100:0)+'%"></span></div></div>';
   if(it.rewatch){const rp=rewatchProgress(it);
@@ -663,8 +663,43 @@ function extraFacts(it){
   if(it.avgEpRating)f.push("Average episode rating "+esc(it.avgEpRating)+"/10");
   return f.length?'<ul class="facts">'+f.map(x=>"<li>"+x+"</li>").join("")+'</ul>':"";
 }
+/* ---------- where to watch (TMDB watch providers, data from JustWatch) ----------
+   US only. Subscription + free-with-ads services; rent/buy left out on purpose.
+   Not saved to the diary: fetched when a title is opened (tmdb() caches it for the session). */
+const PROV={};  // item id -> {loading} | {list,link} | {err}
+const PROV_FIRST="YouTube TV";  // the service you have, listed first when it's there
+function provBase(n){return String(n||"").replace(/\s+(Amazon Channel|Apple TV Channel|Roku Premium Channel|via .+)$/i,"").replace(/\s+(Standard |Basic |basic )?with Ads$/i,"").trim()}
+function cleanProviders(us){
+  const seen=new Map();
+  ["flatrate","free","ads"].forEach(k=>(us[k]||[]).forEach(p=>{const base=provBase(p.provider_name);if(!base)return;
+    const cur=seen.get(base.toLowerCase());const free=k!=="flatrate";
+    if(!cur)seen.set(base.toLowerCase(),{name:base,logo:p.logo_path,free,pri:p.display_priority==null?999:p.display_priority});
+    else{if(!free)cur.free=false;if(p.provider_name===base){cur.logo=p.logo_path}}}));
+  return[...seen.values()].sort((a,b)=>(b.name===PROV_FIRST)-(a.name===PROV_FIRST)||a.free-b.free||a.pri-b.pri);
+}
+async function loadProviders(id){
+  const it=S.items.get(id);if(!it||!it.tmdb||PROV[id]&&!PROV[id].err)return;
+  PROV[id]={loading:true};
+  try{const r=await tmdb("/"+(it.kind==="show"?"tv":"movie")+"/"+it.tmdb+"/watch/providers");
+    const us=(r.results||{}).US||{};PROV[id]={list:cleanProviders(us),link:us.link||""}}
+  catch(e){PROV[id]={err:true}}
+  if(S.openId===id)render();
+}
+function whereToWatch(id,it){
+  if(!it.tmdb)return"";
+  const P=PROV[id];
+  let h='<div class="w2w"><p class="label">Where to watch</p>';
+  if(it.kind==="show"&&it.by)h+='<p class="w2w-net">Originally on <b>'+esc(it.by)+'</b></p>';
+  if(!P)setTimeout(()=>loadProviders(id),0);
+  if(!P||P.loading)h+='<p class="status"><span class="spin"></span>Checking services…</p>';
+  else if(P.err)h+='<p class="hint" style="margin:0">Couldn\'t check right now. <button class="link" type="button" data-a="retryProv">Try again</button></p>';
+  else if(!P.list.length)h+='<p class="hint" style="margin:0">Not on any subscription or free service in the US right now.</p>';
+  else h+='<ul class="w2w-list">'+P.list.map(p=>'<li'+(p.name===PROV_FIRST?' class="mine"':"")+'>'+(p.logo?'<img src="'+esc(img(p.logo,"w92"))+'" alt="" loading="lazy">':'<span class="w2w-ph">'+esc(p.name[0])+'</span>')+'<span class="w2w-n">'+esc(p.name)+(p.free?' <small>Free</small>':"")+'</span></li>').join("")+'</ul>';
+  if(P&&P.list)h+='<p class="w2w-src">'+(P.link?'<a href="'+esc(P.link)+'" target="_blank" rel="noopener">Streaming data from JustWatch</a>':"Streaming data from JustWatch")+'</p>';
+  return h+'</div>';
+}
 function movieDetail(id,it,enter){
-  let b=matchBanner(it)+heroBlock(it,[it.year?'<span class="mono">'+esc(it.year)+'</span>':"",it.by?"Directed by "+esc(it.by):"",it.runtime?'<span class="mono">'+it.runtime+' min</span>':"",esc(it.genre)].filter(Boolean).join(" · "))+extraFacts(it);
+  let b=matchBanner(it)+heroBlock(it,[it.year?'<span class="mono">'+esc(it.year)+'</span>':"",it.by?"Directed by "+esc(it.by):"",it.runtime?'<span class="mono">'+it.runtime+' min</span>':"",esc(it.genre)].filter(Boolean).join(" · "))+extraFacts(it)+whereToWatch(id,it);
   const has=watchesOf(it).length>0;
   b+='<div class="quick">'+(has?'<button class="btn primary" type="button" data-a="movieQuick" data-v="again">'+ICON.rewatch.replace("<svg",'<svg width="16" height="16"')+'Watched again today</button>'
     :'<button class="btn primary" type="button" data-a="movieQuick" data-v="today">'+ICON.check.replace("<svg",'<svg width="16" height="16"')+'Watched today</button><button class="btn ghost" type="button" data-a="movieQuick" data-v="unknown">Seen it, date unknown</button>')+'</div>';
@@ -1148,6 +1183,7 @@ async function relinkTo(oldId,kind,tmdbId){
 
 /* ---------- actions ---------- */
 function openItem(id){S.wEdit=null;S.logTh=false;S.epMenu=null;S.rwSeasonAsk=null;S.openId=id;S.season=null;S.confirm=null;S.markAsk=null;S.logNoDate=false;S.logConf="confirmed";render();
+  loadProviders(id);
   const it=S.items.get(id);if(it&&it.kind==="show"&&!ended(it)&&(!it.refreshedAt||Date.now()-it.refreshedAt>2*864e5))refreshShow(id,true)}
 const A={
   authMode:d=>{S.authMode=d.v;S.authErr="";S.authMsg="";render()},
@@ -1166,6 +1202,7 @@ const A={
   exportJson:()=>{const blob=new Blob([JSON.stringify({exportedAt:new Date().toISOString(),items:Object.fromEntries(S.items)},null,1)],{type:"application/json"});
     const a=document.createElement("a");a.href=URL.createObjectURL(blob);a.download="watch-diary-backup-"+today()+".json";document.body.appendChild(a);a.click();setTimeout(()=>{URL.revokeObjectURL(a.href);a.remove()},500)},
   pick:d=>pickResult(+d.v),
+  retryProv:()=>{const id=S.openId;if(id){delete PROV[id];render();loadProviders(id)}},
   openPicker:()=>{const it=S.items.get(S.openId);if(it&&!it.tmdb)A.openRelink();else openPicker()},
   setPoster:d=>{const P=S.picker;const p=P&&P.posters[+d.v];if(!p)return;const it=clone(P.id);it.poster=p.file_path;S.picker=null;save(P.id,it);toast("Cover updated")},
   watchNext:d=>{const id=d.id;const it=S.items.get(id);const n=it&&nextUp(it);if(!n)return;

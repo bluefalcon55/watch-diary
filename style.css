@@ -485,3 +485,16 @@ button.when{cursor:pointer}
 .watches .wmenu .seg button[aria-pressed="true"]{color:#fff}
 .watches .wmenu .link{color:var(--accent)}
 .watches .wmenu .em-k{min-width:78px}
+
+/* where to watch */
+.w2w{margin:0 0 18px}
+.w2w-net{font-size:13.5px;color:var(--muted);margin:0 0 8px}
+.w2w-net b{color:var(--ink);font-weight:600}
+.w2w-list{list-style:none;margin:0;padding:0;display:flex;flex-wrap:wrap;gap:8px}
+.w2w-list li{display:flex;align-items:center;gap:8px;background:var(--surface);border:1px solid var(--line);border-radius:12px;padding:5px 11px 5px 5px;font-size:13px;font-weight:500}
+.w2w-list li.mine{border-color:var(--accent);box-shadow:0 0 0 1px var(--accent) inset}
+.w2w-list img,.w2w-ph{width:28px;height:28px;border-radius:7px;flex:none;object-fit:cover}
+.w2w-ph{display:grid;place-items:center;background:var(--bg);color:var(--muted);font-weight:700}
+.w2w-n small{font:500 10px var(--f-mono);text-transform:uppercase;letter-spacing:.06em;color:var(--muted);background:var(--bg);border-radius:5px;padding:2px 5px;margin-left:3px}
+.w2w-src{font-size:11.5px;color:var(--faint);margin:8px 0 0}
+.w2w-src a{color:inherit;text-decoration:underline;text-underline-offset:2px}
