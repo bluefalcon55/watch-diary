@@ -572,7 +572,8 @@ function stKey(){return String(stMeta().tmsKey||"").trim()}
 function stInit(){
   if(S.st)return S.st;
   const m=stMeta();let older=true;try{older=localStorage.getItem("wd-st-older")!=="0"}catch(e){}
-  S.st={phase:"idle",zip:m.stZip||"",radius:+m.stRadius||10,older,day:"any",films:[],more:{}};
+  let src="nyc";try{src=localStorage.getItem("wd-st-src")||"nyc"}catch(e){}
+  S.st={src,phase:"idle",zip:m.stZip||"",radius:+m.stRadius||10,older,day:"any",films:[],more:{},nyc:{phase:"idle",films:[],venue:"all"}};
   if(S.st.zip&&stKey())setTimeout(()=>stLoad(false),0);
   return S.st;
 }
@@ -641,8 +642,9 @@ async function stMatch(f){
   f.tm=best?{id:best.id,year:best.year,poster:best.poster}:null;stTmPut(k,f.tm);
 }
 function stYear(f){const ys=[f.year,f.tm&&f.tm.year].filter(Boolean);return ys.length?Math.min(...ys):null}
-function stOlder(f){const y=stYear(f);return!!y&&y<new Date().getFullYear()-1}
+function stOlder(f){const cy=new Date().getFullYear();if(f.prog){const ys=(f.films||[]).map(x=>x.year).filter(Boolean);return!ys.length||ys.some(y=>y<cy-1)}const y=stYear(f);return!!y&&y<cy-1}
 function stDiary(f){
+  if(f.prog)return null;
   if(f.tm&&S.items.has("movie-"+f.tm.id))return["movie-"+f.tm.id,S.items.get("movie-"+f.tm.id)];
   const t=sqz(stCleanTitle(f.title)),y=stYear(f);
   return list("movie").find(([,it])=>sqz(it.title)===t&&(!y||!it.year||Math.abs(it.year-y)<=1))||null;
@@ -674,18 +676,27 @@ function stDayKey(dt){return dt.slice(0,10)}
 function stDayLabel(d){const t=today();if(d===t)return"Today";const tm=new Date(Date.parse(t+"T12:00")+864e5);const tms=tm.getFullYear()+"-"+pad(tm.getMonth()+1)+"-"+pad(tm.getDate());if(d===tms)return"Tomorrow";
   const[y,m,dd]=d.split("-").map(Number);return new Date(y,m-1,dd).toLocaleDateString("en-US",{weekday:"short"})+" "+dd}
 function stTime(dt){let[h,mi]=dt.slice(11,16).split(":").map(Number);const ap=h>=12?"pm":"am";h=h%12||12;return h+(mi?":"+pad(mi):"")+ap}
-function stFilmHtml(f,st){
+function stFilmHtml(f,st,V){
   const y=stYear(f);const d=stDiary(f);const it=d&&d[1];
-  const shows=st.day==="any"?f.shows:f.shows.filter(s=>stDayKey(s.dt)===st.day);
+  const shows=stShowsFor(f,st,V||st);
   const byTh=new Map();shows.forEach(s=>{const k=s.thId||s.th;if(!byTh.has(k))byTh.set(k,{name:s.th,shows:[]});byTh.get(k).shows.push(s)});
   const ths=[...byTh.values()];const open=st.more[f.key];const shown=open?ths:ths.slice(0,3);
   const badge=it?(it.shelf==="watchlist"?'<span class="st-badge wl">On your watchlist</span>':'<span class="st-badge seen">Seen'+(scoreOf(it)?" · "+scoreOf(it)+"/10":"")+'</span>'):"";
+  const fmts=[...new Set(shows.map(s=>s.fmt).filter(x=>/mm/i.test(x||"")))];
   const cv=cover({kind:"movie",title:stCleanTitle(f.title)||f.title,year:y,poster:f.tm&&f.tm.poster},"","w154");
   let h='<article class="st-film"><div class="st-cv">'+(d?'<button type="button" data-a="open" data-id="'+esc(d[0])+'" aria-label="Open '+esc(it.title)+'">'+cv+'</button>':cv)+'</div><div class="st-body">'+
-    '<h3>'+esc(f.title)+'</h3><div class="st-meta">'+(y?'<span class="mono">'+y+'</span>':"")+badge+'</div><ul class="st-ths">';
+    (f.series?'<p class="st-series">'+esc(f.series)+'</p>':"")+
+    '<h3>'+esc(f.title)+'</h3><div class="st-meta">'+(y&&!f.prog?'<span class="mono">'+y+'</span>':"")+(f.dir&&!/various/i.test(f.dir)?'<span>'+esc(f.dir)+'</span>':"")+fmts.map(x=>'<span class="st-badge fmt">'+esc(x)+'</span>').join("")+badge+'</div>';
+  if(f.prog&&f.films&&f.films.length){
+    const fl=f.films.slice(0,6);
+    h+='<ul class="st-prog">'+fl.map(x=>'<li><b>'+esc(x.title)+'</b> '+esc([x.director&&!/various/i.test(x.director)?x.director:"",x.year||"",x.format&&/mm/i.test(x.format)?x.format:""].filter(Boolean).join(" · "))+'</li>').join("")+(f.films.length>6?'<li class="hint" style="margin:0">+'+(f.films.length-6)+' more</li>':"")+'</ul>';
+  }
+  if(f.note)h+='<p class="st-note">'+esc(f.note.length>160?f.note.slice(0,157)+"…":f.note)+'</p>';
+  h+='<ul class="st-ths">';
   shown.forEach(t=>{
     const days=new Map();t.shows.forEach(s=>{const k=stDayKey(s.dt);if(!days.has(k))days.set(k,[]);days.get(k).push(s)});
-    h+='<li><b>'+esc(t.name)+'</b>'+[...days].map(([k,ss])=>'<div class="st-day">'+(st.day==="any"?'<span class="st-dl">'+esc(stDayLabel(k))+'</span>':"")+ss.map(s=>s.url?'<a class="st-t" href="'+esc(s.url)+'" target="_blank" rel="noopener">'+stTime(s.dt)+'</a>':'<span class="st-t">'+stTime(s.dt)+'</span>').join("")+'</div>').join("")+'</li>';
+    h+='<li><b>'+esc(t.name)+'</b>'+[...days].map(([k,ss])=>'<div class="st-day">'+(st.day==="any"?'<span class="st-dl">'+esc(stDayLabel(k))+'</span>':"")+ss.map(s=>{const tt=stTime(s.dt)+(s.note?"*":"");return s.url?'<a class="st-t" href="'+esc(s.url)+'" target="_blank" rel="noopener">'+tt+'</a>':'<span class="st-t">'+tt+'</span>'}).join("")+'</div>'+
+      ss.filter(s=>s.note).map(s=>'<p class="st-tn">* '+stTime(s.dt)+': '+esc(s.note)+'</p>').join("")).join("")+'</li>';
   });
   h+='</ul>';
   if(ths.length>3)h+='<button class="link st-more" type="button" data-a="stMore" data-k="'+esc(f.key)+'">'+(open?"Show fewer theaters":"+"+(ths.length-3)+" more theater"+(ths.length-3===1?"":"s"))+'</button>';
@@ -697,29 +708,85 @@ function stKeyForm(where){
   return'<div class="st-key"><p><b>Connect Gracenote to see showtimes.</b> Get a free key at developer.tmsapi.com (the “OnConnect” API), then paste it here. It\'s saved to your account, so it works on your phone and computer.</p>'+
     '<form class="search" data-f="tmsKey"><input id="st-key-'+where+'" type="text" autocomplete="off" autocapitalize="off" spellcheck="false" placeholder="Paste your API key" value="'+esc(where==="set"?stKey():"")+'" aria-label="Gracenote API key"><button class="btn primary" type="submit">Save</button></form></div>';
 }
+/* NYC repertory listings: data/screenslate.json, refreshed twice a day by a GitHub Action
+   (.github/workflows/screenslate.yml) from Screen Slate. Same origin, so no key and no CORS. */
+function nycParse(doc){
+  const now=new Date();const nowS=now.getFullYear()+"-"+pad(now.getMonth()+1)+"-"+pad(now.getDate())+"T"+pad(now.getHours())+":"+pad(now.getMinutes());
+  const byKey=new Map();
+  (doc&&doc.screenings||[]).forEach(s=>{
+    const times=(s.times||[]).filter(t=>t.dt>=nowS);if(!times.length)return;
+    const films=s.films||[];const one=films.length===1?films[0]:null;
+    const prog=!one;const title=one?(one.title||s.title):s.title;const year=one?one.year:null;
+    const key=prog?"p"+s.id:"f"+norm(title)+"|"+(year||"");
+    let f=byKey.get(key);
+    if(!f){f={key,title,year,event:false,prog,films,dir:one?one.director:"",series:s.series||"",note:s.note||"",shows:[],tm:prog?null:undefined};byKey.set(key,f)}
+    times.forEach(t=>f.shows.push({th:s.venue,thId:s.venueSlug||s.venue,dt:t.dt,url:s.url||"",note:t.note||"",fmt:one?one.format:""}));
+  });
+  const out=[...byKey.values()];out.forEach(f=>f.shows.sort((a,b)=>a.dt.localeCompare(b.dt)));
+  const c=stTmGet();out.forEach(f=>{if(f.tm===undefined){const k=norm(f.title)+"|"+(f.year||"");if(k in c)f.tm=c[k]}});
+  return out;
+}
+async function nycLoad(force){
+  const st=stInit();const N=st.nyc;const seq=N.seq=(N.seq||0)+1;
+  N.phase="loading";N.err="";render();
+  try{
+    const r=await fetch("data/screenslate.json?h="+(force?Date.now():Math.floor(Date.now()/36e5)),{cache:force?"no-store":"default"});
+    if(r.status===404)throw new Error("missing");
+    if(!r.ok)throw new Error("http "+r.status);
+    const doc=await r.json();if(N.seq!==seq)return;
+    N.films=nycParse(doc);N.at=Date.parse(doc.updated)||Date.now();N.phase="ready";
+    if(st.day==="any"||!N.films.some(f=>f.shows.some(s=>stDayKey(s.dt)===st.day)))st.day=N.films.some(f=>f.shows.some(s=>stDayKey(s.dt)===today()))?today():"any";
+  }catch(e){if(N.seq!==seq)return;N.phase="error";N.err=e.message==="missing"?"NYC listings haven't been fetched yet. They update twice a day; check back soon.":"Couldn't load NYC listings. Check your connection and try again."}
+  render();
+}
+let stMatchBusy=false;
+async function stMatchSome(list){
+  if(stMatchBusy)return;const todo=list.filter(f=>f.tm===undefined).slice(0,40);if(!todo.length)return;
+  stMatchBusy=true;
+  try{await pool(todo,3,async f=>{try{await stMatch(f)}catch(e){f.tm=null}renderSoon()})}finally{stMatchBusy=false}
+  renderSoon();
+}
+function stSrcView(st){return st.src==="nyc"?st.nyc:st}
+function stShowsFor(f,st,V){return f.shows.filter(s=>(st.day==="any"||stDayKey(s.dt)===st.day)&&(!V.venue||V.venue==="all"||s.thId===V.venue))}
 function theatersView(){
-  const st=stInit();
-  let h='<div class="head"><h1>In theaters</h1>'+(st.phase==="ready"?'<span class="count">'+st.films.filter(f=>!st.older||stOlder(f)).length+' FILMS</span>':"")+'</div>';
-  if(!stKey())return h+stKeyForm("tab");
-  h+='<form class="st-where" data-f="stWhere"><label class="ctl"><span>Zip code</span><input id="st-zip" type="text" inputmode="numeric" pattern="[0-9]*" maxlength="5" autocomplete="postal-code" value="'+esc(st.zip)+'" placeholder="10001"></label>'+
-    '<label class="ctl"><span>Within</span><select id="st-radius" data-c="stRadius">'+ST_RADII.map(r=>'<option value="'+r+'"'+(r===st.radius?" selected":"")+'>'+r+' miles</option>').join("")+'</select></label>'+
-    '<button class="btn primary" type="submit">Find</button></form>';
+  const st=stInit();const V=stSrcView(st);const nyc=st.src==="nyc";
+  if(nyc&&V.phase==="idle")setTimeout(()=>nycLoad(false),0);
+  let films=[],days=[];
+  if(V.phase==="ready"){
+    films=V.films.filter(f=>!st.older||stOlder(f));
+    days=[...new Set(films.flatMap(f=>f.shows.map(s=>stDayKey(s.dt))))].sort();
+    if(st.day!=="any"&&!days.includes(st.day))st.day="any";
+    films=films.filter(f=>stShowsFor(f,st,V).length);
+  }
+  let h='<div class="head"><h1>In theaters</h1>'+(V.phase==="ready"?'<span class="count">'+films.length+(films.length===1?" FILM":" FILMS")+'</span>':"")+'</div>';
+  h+='<div class="chips st-src" data-scroll="chips-src"><button class="chip" type="button" aria-pressed="'+nyc+'" data-a="stSrc" data-v="nyc">NYC repertory</button><button class="chip" type="button" aria-pressed="'+!nyc+'" data-a="stSrc" data-v="zip">By zip code</button></div>';
+  if(!nyc){
+    if(!stKey())return h+'<p class="hint" style="margin:0 0 10px">Zip-code search uses Gracenote, which needs an approved key. Your sign-up is waiting on Gracenote.</p>'+stKeyForm("tab");
+    h+='<form class="st-where" data-f="stWhere"><label class="ctl"><span>Zip code</span><input id="st-zip" type="text" inputmode="numeric" pattern="[0-9]*" maxlength="5" autocomplete="postal-code" value="'+esc(st.zip)+'" placeholder="10001"></label>'+
+      '<label class="ctl"><span>Within</span><select id="st-radius" data-c="stRadius">'+ST_RADII.map(r=>'<option value="'+r+'"'+(r===st.radius?" selected":"")+'>'+r+' miles</option>').join("")+'</select></label>'+
+      '<button class="btn primary" type="submit">Find</button></form>';
+  }else if(V.phase==="ready"){
+    const venues=[...new Map(V.films.flatMap(f=>f.shows).map(s=>[s.thId,s.th])).entries()].sort((a,b)=>a[1].localeCompare(b[1]));
+    if(V.venue!=="all"&&!venues.some(([k])=>k===V.venue))V.venue="all";
+    h+='<div class="controls st-ven"><label class="ctl"><span>Theater</span><select data-c="stVenue">'+[["all","All theaters"]].concat(venues).map(([k,l])=>'<option value="'+esc(k)+'"'+(k===V.venue?" selected":"")+'>'+esc(l)+'</option>').join("")+'</select></label></div>';
+  }
   h+='<div class="chips" data-scroll="chips-st"><button class="chip" type="button" aria-pressed="'+st.older+'" data-a="stOlder" data-v="1">Older films</button><button class="chip" type="button" aria-pressed="'+!st.older+'" data-a="stOlder" data-v="0">Everything</button></div>';
-  if(st.phase==="idle")return h+'<div class="empty"><p>Enter your zip code to see what\'s screening nearby this week. “Older films” shows revivals and re-releases.</p></div>';
-  if(st.phase==="loading")return h+'<p class="status"><span class="spin"></span>Checking theaters near '+esc(st.zip)+'…</p>';
-  if(st.phase==="error")return h+'<div class="empty"><p>'+esc(st.err)+'</p>'+(st.zip?'<button class="btn ghost" type="button" data-a="stRefresh">Try again</button>':"")+'</div>';
-  let films=st.films.filter(f=>!st.older||stOlder(f));
-  const days=[...new Set(films.flatMap(f=>f.shows.map(s=>stDayKey(s.dt))))].sort();
-  if(st.day!=="any"&&!days.includes(st.day))st.day="any";
-  if(st.day!=="any")films=films.filter(f=>f.shows.some(s=>stDayKey(s.dt)===st.day));
-  const matching=st.films.some(f=>f.tm===undefined);
-  if(days.length>1)h+='<div class="chips st-days" data-scroll="chips-stday">'+[["any","All week"]].concat(days.map(d=>[d,stDayLabel(d)])).map(([k,l])=>'<button class="chip" type="button" aria-pressed="'+(k===st.day)+'" data-a="stDay" data-v="'+k+'">'+esc(l)+'</button>').join("")+'</div>';
+  if(V.phase==="idle")return h+(nyc?'<p class="status"><span class="spin"></span>Loading NYC listings…</p>':'<div class="empty"><p>Enter a zip code to see what\'s screening nearby this week. “Older films” shows revivals and re-releases.</p></div>');
+  if(V.phase==="loading")return h+'<p class="status"><span class="spin"></span>'+(nyc?"Loading NYC listings…":"Checking theaters near "+esc(st.zip)+"…")+'</p>';
+  if(V.phase==="error")return h+'<div class="empty"><p>'+esc(V.err)+'</p><button class="btn ghost" type="button" data-a="stRefresh">Try again</button></div>';
+  if(days.length>1)h+='<div class="chips st-days" data-scroll="chips-stday">'+[["any",nyc?"Next 2 weeks":"All week"]].concat(days.map(d=>[d,stDayLabel(d)])).map(([k,l])=>'<button class="chip" type="button" aria-pressed="'+(k===st.day)+'" data-a="stDay" data-v="'+k+'">'+esc(l)+'</button>').join("")+'</div>';
   const rank=f=>{const d=stDiary(f);return d&&d[1].shelf==="watchlist"?0:1};
-  films.sort((a,b)=>rank(a)-rank(b)||a.shows[0].dt.localeCompare(b.shows[0].dt));
-  if(!films.length)h+='<div class="empty"><p>'+(st.older?(matching?"Checking release years…":"No older films within "+st.radius+" miles this week. Try a wider radius, or switch to Everything."):"Nothing showing within "+st.radius+" miles this week.")+'</p></div>';
-  else h+=(matching?'<p class="status"><span class="spin"></span>Matching titles…</p>':"")+films.map(f=>stFilmHtml(f,st)).join("");
-  const mins=Math.round((Date.now()-(st.at||Date.now()))/6e4);
-  h+='<p class="hint st-foot">Updated '+(mins<1?"just now":mins<60?mins+" min ago":Math.round(mins/60)+" hr ago")+' · <button class="link" type="button" data-a="stRefresh">Refresh</button><br>Showtimes from Gracenote. Small independent theaters may not be listed.</p>';
+  const first=f=>stShowsFor(f,st,V)[0].dt;
+  films.sort((a,b)=>rank(a)-rank(b)||first(a).localeCompare(first(b)));
+  const matching=!nyc&&V.films.some(f=>f.tm===undefined);
+  if(nyc&&films.some(f=>f.tm===undefined))setTimeout(()=>stMatchSome(films),0);
+  const where=nyc?(V.venue&&V.venue!=="all"?"at this theater":"in NYC"):"within "+st.radius+" miles";
+  const when=st.day==="any"?(nyc?"in the next two weeks":"this week"):stDayLabel(st.day)==="Today"?"today":stDayLabel(st.day)==="Tomorrow"?"tomorrow":"on "+stDayLabel(st.day);
+  if(!films.length)h+='<div class="empty"><p>'+(st.older&&matching?"Checking release years…":"No "+(st.older?"older films":"screenings")+" "+where+" "+when+"."+(st.older?" Try Everything, or another day.":""))+'</p></div>';
+  else h+=(matching?'<p class="status"><span class="spin"></span>Matching titles…</p>':"")+films.map(f=>stFilmHtml(f,st,V)).join("");
+  const mins=Math.round((Date.now()-(V.at||Date.now()))/6e4);
+  h+='<p class="hint st-foot">Updated '+(mins<1?"just now":mins<60?mins+" min ago":mins<2880?Math.round(mins/60)+" hr ago":Math.round(mins/1440)+" days ago")+' · <button class="link" type="button" data-a="stRefresh">Refresh</button><br>'+
+    (nyc?'Listings from <a class="link" href="https://www.screenslate.com/listings" target="_blank" rel="noopener">Screen Slate</a>. Tap a time for the theater\'s page.':'Showtimes from Gracenote. Small independent theaters may not be listed.')+'</p>';
   return h;
 }
 async function stSaveKey(where){
@@ -736,7 +803,7 @@ function stWhere(){
   stLoad(false);
 }
 async function stAdd(k){
-  const f=S.st&&S.st.films.find(x=>x.key===k);if(!f||!f.tm)return;const id="movie-"+f.tm.id;
+  const f=S.st&&(S.st.films.find(x=>x.key===k)||S.st.nyc.films.find(x=>x.key===k));if(!f||!f.tm)return;const id="movie-"+f.tm.id;
   if(S.items.has(id)){openItem(id);return}
   try{const doc=await buildFromTmdb("movie",f.tm.id);doc.shelf="watchlist";save(id,doc);toast("Added "+doc.title+" to your watchlist")}
   catch(e){toast("Couldn't load that title from TMDB. Try again.")}
@@ -1471,7 +1538,8 @@ const A={
   stOlder:d=>{const st=stInit();st.older=d.v==="1";try{localStorage.setItem("wd-st-older",st.older?"1":"0")}catch(e){}render()},
   stDay:d=>{stInit().day=d.v;render()},
   stMore:d=>{const st=stInit();st.more[d.k]=!st.more[d.k];render()},
-  stRefresh:()=>{const st=stInit();if(st.zip)stLoad(true);else render()},
+  stRefresh:()=>{const st=stInit();if(st.src==="nyc")nycLoad(true);else if(st.zip)stLoad(true);else render()},
+  stSrc:d=>{const st=stInit();st.src=d.v;st.more={};try{localStorage.setItem("wd-st-src",d.v)}catch(e){}render()},
   stAdd:d=>stAdd(d.k),
   toastAct:()=>{const a=toastAction;document.getElementById("toast").innerHTML="";toastAction=null;if(a)a.fn()}
 };
@@ -1500,6 +1568,7 @@ document.addEventListener("change",e=>{
   else if(c==="notes"){const it=clone(S.openId);if((it.notes||"")!==el.value){it.notes=el.value.slice(0,5000);save(S.openId,it)}}
   else if(c==="logNoDate"){S.logNoDate=el.checked;render()}
   else if(c==="logTh"){S.logTh=el.checked}
+  else if(c==="stVenue"){const st=stInit();st.nyc.venue=el.value;render()}
   else if(c==="stRadius"){const st=stInit();st.radius=+el.value;if(/^\d{5}$/.test(((document.getElementById("st-zip")||{}).value||"").trim()))stWhere();else render()}
   else if(c==="sortBy"){S.sortBy=Object.assign({},S.sortBy,{[el.dataset.k]:el.value});savePrefs();render()}
   else if(c==="fScore"||c==="fDecade"||c==="fYear"||c==="fTh"){const k=el.dataset.k;const f=Object.assign({},getF(k));f[{fScore:"score",fDecade:"decade",fYear:"fy",fTh:"th"}[c]]=el.value;S.filt=Object.assign({},S.filt,{[k]:f});render()}
