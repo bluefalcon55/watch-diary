@@ -255,7 +255,7 @@ async function initAuth(){
   sb.auth.onAuthStateChange((ev,session)=>{const u=session?session.user:null;if((u&&u.id)!==(S.user&&S.user.id))setUser(u)});
 }
 function setUser(u){
-  S.user=u;S.authReady=true;S.items=new Map();S.loaded=false;
+  S.user=u;S.st=null;S.authReady=true;S.items=new Map();S.loaded=false;
   if(u){readCache();render();loadAll()}else render();
 }
 async function doAuth(){
@@ -562,9 +562,188 @@ function undatedView(und){
   });
   return h+'</ul></section>';
 }
+/* ---------- showtimes (Gracenote / TMS OnConnect) ----------
+   One API call per search (the free tier allows ~50 a day), cached on this device for
+   6 hours. The key lives in the signed-in user's Supabase profile, never in this repo. */
+const ST_RADII=[5,10,15,25,50];
+const ST_TTL=6*3600e3;
+function stMeta(){return(S.user&&S.user.user_metadata)||{}}
+function stKey(){return String(stMeta().tmsKey||"").trim()}
+function stInit(){
+  if(S.st)return S.st;
+  const m=stMeta();let older=true;try{older=localStorage.getItem("wd-st-older")!=="0"}catch(e){}
+  S.st={phase:"idle",zip:m.stZip||"",radius:+m.stRadius||10,older,day:"any",films:[],more:{}};
+  if(S.st.zip&&stKey())setTimeout(()=>stLoad(false),0);
+  return S.st;
+}
+async function saveMeta(patch){
+  const{data,error}=await sb.auth.updateUser({data:patch});
+  if(error)throw error;
+  if(data&&data.user)S.user=data.user;
+}
+function stCacheGet(k){try{const c=JSON.parse(localStorage.getItem(k)||"null");if(c&&Date.now()-c.at<ST_TTL)return c}catch(e){}return null}
+function jsonp(url){
+  return new Promise((res,rej)=>{
+    const cb="__wdst"+Date.now()+Math.floor(Math.random()*1e4);const s=document.createElement("script");
+    const done=()=>{clearTimeout(t);delete window[cb];s.remove()};
+    const t=setTimeout(()=>{done();rej(new Error("timeout"))},20000);
+    window[cb]=d=>{done();res(d)};s.onerror=()=>{done();rej(new Error("network"))};
+    s.src=url+"&jsonp="+cb;document.head.appendChild(s);
+  });
+}
+async function tmsShowings(zip,radius,key){
+  const u="https://data.tmsapi.com/v1.1/movies/showings?startDate="+today()+"&numDays=7&zip="+encodeURIComponent(zip)+"&radius="+radius+"&units=mi&api_key="+encodeURIComponent(key);
+  let r;
+  try{r=await fetch(u,{headers:{accept:"application/json"}})}
+  catch(e){return jsonp(u)}  // no CORS headers on this API → fall back to JSONP
+  if(r.ok)return r.json();
+  const txt=await r.text().catch(()=>"");
+  if(/over\s*(qps|rate)|rate limit|quota|limit/i.test(txt))throw new Error("limit");
+  if(r.status===401||r.status===403)throw new Error("key");
+  throw new Error("http "+r.status);
+}
+const ST_EVENT=/\b(\d+(st|nd|rd|th)\s+anniversary|anniversary|re-?release|remaster(ed)?|restoration|restored|in\s+(35|70)\s*mm|35mm|70mm|imax|3d|4k|presents?|fest(ival)?|double feature|sing-?along|marathon|director'?s cut|extended (cut|edition))\b/i;
+function stCleanTitle(t){
+  return String(t||"")
+    .replace(/^.{0,40}?(presents|fest(ival)?\s*\d{0,4}|classics?|fathom events?)\s*[:\-–]\s*/i,"")
+    .replace(/\s*\((\d{4}|re-?release|[^)]*anniversary[^)]*|[^)]*mm|imax|3d)\)\s*/ig," ")
+    .replace(/\s*[:\-–]\s*(the\s+)?\d+(st|nd|rd|th)\s+anniversary.*$/i,"")
+    .replace(/\s+\d+(st|nd|rd|th)\s+anniversary.*$/i,"")
+    .replace(/\s+(in\s+)?(35|70)\s*mm\b.*$/i,"").replace(/\s+(re-?release|remastered|restored|4k restoration)\s*$/i,"")
+    .replace(/\s+/g," ").trim();
+}
+function stParse(raw){
+  const now=new Date();const nowS=now.getFullYear()+"-"+pad(now.getMonth()+1)+"-"+pad(now.getDate())+"T"+pad(now.getHours())+":"+pad(now.getMinutes());
+  return(Array.isArray(raw)?raw:[]).map(m=>{
+    const shows=(m.showtimes||[]).filter(s=>s&&s.dateTime&&s.dateTime>=nowS).map(s=>({th:(s.theatre&&s.theatre.name)||"Theater",thId:(s.theatre&&s.theatre.id)||"",dt:s.dateTime,url:s.ticketURI||"",q:s.quals||""}));
+    const y=parseInt(m.releaseYear,10)||parseInt(String(m.releaseDate||"").slice(0,4),10)||null;
+    return{key:String(m.rootId||m.tmsId||m.title),title:m.title||"Untitled",year:y,event:ST_EVENT.test(m.title||""),shows,tm:undefined};
+  }).filter(f=>f.shows.length);
+}
+/* TMDB match: poster, original year (catches anniversary re-releases), diary link. */
+let stTmCache=null;
+function stTmGet(){if(!stTmCache){try{stTmCache=JSON.parse(localStorage.getItem("wd-st-tm")||"{}")}catch(e){stTmCache={}}}return stTmCache}
+function stTmPut(k,v){const c=stTmGet();c[k]=v;const ks=Object.keys(c);if(ks.length>600)ks.slice(0,ks.length-500).forEach(x=>delete c[x]);try{localStorage.setItem("wd-st-tm",JSON.stringify(c))}catch(e){}}
+async function stMatch(f){
+  const k=norm(f.title)+"|"+(f.year||"");const c=stTmGet();
+  if(k in c){f.tm=c[k];return}
+  const q=stCleanTitle(f.title)||f.title;
+  const r=await tmdb("/search/movie",{query:q,include_adult:"false"});
+  const res=(r.results||[]).map(x=>({id:x.id,title:x.title,year:parseInt((x.release_date||"").slice(0,4),10)||null,poster:x.poster_path||null,pop:x.popularity||0}));
+  const exact=res.filter(x=>sqz(x.title)===sqz(q));
+  const pool_=exact.length?exact:res.slice(0,1);
+  const cy=new Date().getFullYear();let best=null;
+  if(pool_.length){
+    if(f.year&&f.year<cy-1&&!f.event)best=pool_.slice().sort((a,b)=>Math.abs((a.year||0)-f.year)-Math.abs((b.year||0)-f.year))[0];
+    else if(f.event&&exact.length)best=exact.filter(x=>x.year).sort((a,b)=>b.pop-a.pop)[0]||exact[0];
+    else best=pool_.slice().sort((a,b)=>Math.abs((a.year||cy)-(f.year||cy))-Math.abs((b.year||cy)-(f.year||cy))||b.pop-a.pop)[0];
+  }
+  f.tm=best?{id:best.id,year:best.year,poster:best.poster}:null;stTmPut(k,f.tm);
+}
+function stYear(f){const ys=[f.year,f.tm&&f.tm.year].filter(Boolean);return ys.length?Math.min(...ys):null}
+function stOlder(f){const y=stYear(f);return!!y&&y<new Date().getFullYear()-1}
+function stDiary(f){
+  if(f.tm&&S.items.has("movie-"+f.tm.id))return["movie-"+f.tm.id,S.items.get("movie-"+f.tm.id)];
+  const t=sqz(stCleanTitle(f.title)),y=stYear(f);
+  return list("movie").find(([,it])=>sqz(it.title)===t&&(!y||!it.year||Math.abs(it.year-y)<=1))||null;
+}
+async function stLoad(force){
+  const st=S.st;const zip=st.zip,radius=st.radius,key=stKey();
+  if(!/^\d{5}$/.test(zip)){st.phase="error";st.err="Enter a 5-digit zip code.";render();return}
+  if(!key){st.phase="nokey";render();return}
+  const ck="wd-st-"+zip+"-"+radius+"-"+today();
+  const hit=!force&&stCacheGet(ck);
+  const seq=st.seq=(st.seq||0)+1;
+  st.phase="loading";st.err="";render();
+  let raw;
+  try{
+    if(hit)raw=hit.data;else{raw=await tmsShowings(zip,radius,key);try{localStorage.setItem(ck,JSON.stringify({at:Date.now(),data:raw}))}catch(e){}}
+  }catch(e){
+    if(st.seq!==seq)return;
+    st.phase="error";
+    st.err=e.message==="key"?"Gracenote didn't accept that API key. Check it in Settings.":e.message==="limit"?"You've hit Gracenote's daily limit. It resets tomorrow; recent searches still work from this device.":"Couldn't reach Gracenote. Check your connection and try again.";
+    render();return;
+  }
+  if(st.seq!==seq)return;
+  st.films=stParse(raw);st.at=hit?hit.at:Date.now();st.phase="ready";st.day="any";st.more={};render();
+  const c=stTmGet();st.films.forEach(f=>{const k=norm(f.title)+"|"+(f.year||"");if(k in c)f.tm=c[k]});
+  render();
+  await pool(st.films.filter(f=>f.tm===undefined),3,async f=>{try{await stMatch(f)}catch(e){f.tm=null}if(st.seq===seq)renderSoon()});
+}
+function stDayKey(dt){return dt.slice(0,10)}
+function stDayLabel(d){const t=today();if(d===t)return"Today";const tm=new Date(Date.parse(t+"T12:00")+864e5);const tms=tm.getFullYear()+"-"+pad(tm.getMonth()+1)+"-"+pad(tm.getDate());if(d===tms)return"Tomorrow";
+  const[y,m,dd]=d.split("-").map(Number);return new Date(y,m-1,dd).toLocaleDateString("en-US",{weekday:"short"})+" "+dd}
+function stTime(dt){let[h,mi]=dt.slice(11,16).split(":").map(Number);const ap=h>=12?"pm":"am";h=h%12||12;return h+(mi?":"+pad(mi):"")+ap}
+function stFilmHtml(f,st){
+  const y=stYear(f);const d=stDiary(f);const it=d&&d[1];
+  const shows=st.day==="any"?f.shows:f.shows.filter(s=>stDayKey(s.dt)===st.day);
+  const byTh=new Map();shows.forEach(s=>{const k=s.thId||s.th;if(!byTh.has(k))byTh.set(k,{name:s.th,shows:[]});byTh.get(k).shows.push(s)});
+  const ths=[...byTh.values()];const open=st.more[f.key];const shown=open?ths:ths.slice(0,3);
+  const badge=it?(it.shelf==="watchlist"?'<span class="st-badge wl">On your watchlist</span>':'<span class="st-badge seen">Seen'+(scoreOf(it)?" · "+scoreOf(it)+"/10":"")+'</span>'):"";
+  const cv=cover({kind:"movie",title:stCleanTitle(f.title)||f.title,year:y,poster:f.tm&&f.tm.poster},"","w154");
+  let h='<article class="st-film"><div class="st-cv">'+(d?'<button type="button" data-a="open" data-id="'+esc(d[0])+'" aria-label="Open '+esc(it.title)+'">'+cv+'</button>':cv)+'</div><div class="st-body">'+
+    '<h3>'+esc(f.title)+'</h3><div class="st-meta">'+(y?'<span class="mono">'+y+'</span>':"")+badge+'</div><ul class="st-ths">';
+  shown.forEach(t=>{
+    const days=new Map();t.shows.forEach(s=>{const k=stDayKey(s.dt);if(!days.has(k))days.set(k,[]);days.get(k).push(s)});
+    h+='<li><b>'+esc(t.name)+'</b>'+[...days].map(([k,ss])=>'<div class="st-day">'+(st.day==="any"?'<span class="st-dl">'+esc(stDayLabel(k))+'</span>':"")+ss.map(s=>s.url?'<a class="st-t" href="'+esc(s.url)+'" target="_blank" rel="noopener">'+stTime(s.dt)+'</a>':'<span class="st-t">'+stTime(s.dt)+'</span>').join("")+'</div>').join("")+'</li>';
+  });
+  h+='</ul>';
+  if(ths.length>3)h+='<button class="link st-more" type="button" data-a="stMore" data-k="'+esc(f.key)+'">'+(open?"Show fewer theaters":"+"+(ths.length-3)+" more theater"+(ths.length-3===1?"":"s"))+'</button>';
+  if(!d&&f.tm)h+='<button class="btn ghost sm st-add" type="button" data-a="stAdd" data-k="'+esc(f.key)+'">'+ICON.plus.replace("<svg",'<svg width="14" height="14"')+'Add to watchlist</button>';
+  return h+'</div></article>';
+}
+function stKeyForm(where){
+  if(where==="set"&&stKey())return'<div class="st-key"><form class="search" data-f="tmsKey"><input id="st-key-set" type="text" autocomplete="off" autocapitalize="off" spellcheck="false" value="'+esc(stKey())+'" aria-label="Gracenote API key"><button class="btn ghost" type="submit">Update</button></form><p class="hint" style="margin:0">Clear the box and tap Update to remove it.</p></div>';
+  return'<div class="st-key"><p><b>Connect Gracenote to see showtimes.</b> Get a free key at developer.tmsapi.com (the “OnConnect” API), then paste it here. It\'s saved to your account, so it works on your phone and computer.</p>'+
+    '<form class="search" data-f="tmsKey"><input id="st-key-'+where+'" type="text" autocomplete="off" autocapitalize="off" spellcheck="false" placeholder="Paste your API key" value="'+esc(where==="set"?stKey():"")+'" aria-label="Gracenote API key"><button class="btn primary" type="submit">Save</button></form></div>';
+}
+function theatersView(){
+  const st=stInit();
+  let h='<div class="head"><h1>In theaters</h1>'+(st.phase==="ready"?'<span class="count">'+st.films.filter(f=>!st.older||stOlder(f)).length+' FILMS</span>':"")+'</div>';
+  if(!stKey())return h+stKeyForm("tab");
+  h+='<form class="st-where" data-f="stWhere"><label class="ctl"><span>Zip code</span><input id="st-zip" type="text" inputmode="numeric" pattern="[0-9]*" maxlength="5" autocomplete="postal-code" value="'+esc(st.zip)+'" placeholder="10001"></label>'+
+    '<label class="ctl"><span>Within</span><select id="st-radius" data-c="stRadius">'+ST_RADII.map(r=>'<option value="'+r+'"'+(r===st.radius?" selected":"")+'>'+r+' miles</option>').join("")+'</select></label>'+
+    '<button class="btn primary" type="submit">Find</button></form>';
+  h+='<div class="chips" data-scroll="chips-st"><button class="chip" type="button" aria-pressed="'+st.older+'" data-a="stOlder" data-v="1">Older films</button><button class="chip" type="button" aria-pressed="'+!st.older+'" data-a="stOlder" data-v="0">Everything</button></div>';
+  if(st.phase==="idle")return h+'<div class="empty"><p>Enter your zip code to see what\'s screening nearby this week. “Older films” shows revivals and re-releases.</p></div>';
+  if(st.phase==="loading")return h+'<p class="status"><span class="spin"></span>Checking theaters near '+esc(st.zip)+'…</p>';
+  if(st.phase==="error")return h+'<div class="empty"><p>'+esc(st.err)+'</p>'+(st.zip?'<button class="btn ghost" type="button" data-a="stRefresh">Try again</button>':"")+'</div>';
+  let films=st.films.filter(f=>!st.older||stOlder(f));
+  const days=[...new Set(films.flatMap(f=>f.shows.map(s=>stDayKey(s.dt))))].sort();
+  if(st.day!=="any"&&!days.includes(st.day))st.day="any";
+  if(st.day!=="any")films=films.filter(f=>f.shows.some(s=>stDayKey(s.dt)===st.day));
+  const matching=st.films.some(f=>f.tm===undefined);
+  if(days.length>1)h+='<div class="chips st-days" data-scroll="chips-stday">'+[["any","All week"]].concat(days.map(d=>[d,stDayLabel(d)])).map(([k,l])=>'<button class="chip" type="button" aria-pressed="'+(k===st.day)+'" data-a="stDay" data-v="'+k+'">'+esc(l)+'</button>').join("")+'</div>';
+  const rank=f=>{const d=stDiary(f);return d&&d[1].shelf==="watchlist"?0:1};
+  films.sort((a,b)=>rank(a)-rank(b)||a.shows[0].dt.localeCompare(b.shows[0].dt));
+  if(!films.length)h+='<div class="empty"><p>'+(st.older?(matching?"Checking release years…":"No older films within "+st.radius+" miles this week. Try a wider radius, or switch to Everything."):"Nothing showing within "+st.radius+" miles this week.")+'</p></div>';
+  else h+=(matching?'<p class="status"><span class="spin"></span>Matching titles…</p>':"")+films.map(f=>stFilmHtml(f,st)).join("");
+  const mins=Math.round((Date.now()-(st.at||Date.now()))/6e4);
+  h+='<p class="hint st-foot">Updated '+(mins<1?"just now":mins<60?mins+" min ago":Math.round(mins/60)+" hr ago")+' · <button class="link" type="button" data-a="stRefresh">Refresh</button><br>Showtimes from Gracenote. Small independent theaters may not be listed.</p>';
+  return h;
+}
+async function stSaveKey(where){
+  const v=((document.getElementById("st-key-"+where)||{}).value||"").trim();
+  if(document.activeElement)document.activeElement.blur();
+  try{await saveMeta({tmsKey:v});toast(v?"Gracenote key saved":"Gracenote key removed");if(S.st&&v&&S.st.zip)stLoad(true);else render()}
+  catch(e){toast("Couldn't save the key. Try again.")}
+}
+function stWhere(){
+  const st=stInit();const zip=((document.getElementById("st-zip")||{}).value||"").trim();
+  if(document.activeElement)document.activeElement.blur();
+  st.zip=zip;if(!/^\d{5}$/.test(zip)){st.phase="error";st.err="Enter a 5-digit zip code.";render();return}
+  const m=stMeta();if(m.stZip!==zip||+m.stRadius!==st.radius)saveMeta({stZip:zip,stRadius:st.radius}).catch(()=>{});
+  stLoad(false);
+}
+async function stAdd(k){
+  const f=S.st&&S.st.films.find(x=>x.key===k);if(!f||!f.tm)return;const id="movie-"+f.tm.id;
+  if(S.items.has(id)){openItem(id);return}
+  try{const doc=await buildFromTmdb("movie",f.tm.id);doc.shelf="watchlist";save(id,doc);toast("Added "+doc.title+" to your watchlist")}
+  catch(e){toast("Couldn't load that title from TMDB. Try again.")}
+}
 function tabbar(){
   const t=(k,l,i)=>'<button class="tab" type="button" data-a="tab" data-v="'+k+'" '+(S.tab===k?'aria-current="page"':"")+'>'+ICON[i]+l+'</button>';
-  return'<nav class="tabbar" aria-label="Sections"><div class="wrap">'+t("shows","Shows","tv")+t("movies","Movies","film")+t("diary","Diary","cal")+'</div></nav>';
+  return'<nav class="tabbar" aria-label="Sections"><div class="wrap">'+t("shows","Shows","tv")+t("movies","Movies","film")+t("diary","Diary","cal")+t("theaters","Theaters","ticket")+'</div></nav>';
 }
 
 /* ---------- sheets ---------- */
@@ -786,6 +965,7 @@ function settingsSheet(enter){
     '<div class="row-s"><span>Signed in as<br><b>'+esc(S.user&&S.user.email)+'</b></span><button class="btn ghost" type="button" data-a="signOut">Sign out</button></div>'+
     '<div class="row-s"><span>Backup<br><span class="hint" style="margin:0">'+n+' titles</span></span><button class="btn ghost" type="button" data-a="exportJson">Download backup</button></div>'+
     importPanel()+
+    '<div class="row-s st-set"><span>Theater showtimes<br><span class="hint" style="margin:0">'+(stKey()?"Gracenote key saved":"Not connected")+'</span></span></div>'+stKeyForm("set")+
     '<p class="attribution">Movie and TV data and images from TMDB. This product uses the TMDB API but is not endorsed or certified by TMDB.</p></div>';
   return sheetShell(b,{enter,label:"Settings",icon:ICON.x});
 }
@@ -815,7 +995,7 @@ document.addEventListener("touchmove",e=>{if(drag)e.preventDefault()},{passive:f
 
 /* ---------- render ---------- */
 const app=document.getElementById("app"),layer=document.getElementById("layer");
-function isTyping(){const a=document.activeElement;return!!a&&layer.contains(a)&&(a.tagName==="TEXTAREA"||(a.tagName==="INPUT"&&/^(text|search|number|email|password|date|month)$/.test(a.type)))}
+function isTyping(){const a=document.activeElement;return!!a&&(layer.contains(a)||/^st-/.test(a.id))&&(a.tagName==="TEXTAREA"||(a.tagName==="INPUT"&&/^(text|search|number|email|password|date|month)$/.test(a.type)))}
 function render(){
   if(isTyping()||drag){S.renderPending=true;return}
   S.renderPending=false;
@@ -830,7 +1010,7 @@ function render(){
   let main;
   if(!S.loaded)main=loading();
   else if(!S.items.size)main=firstRun();
-  else main=fixBanner()+(S.tab==="shows"?showsView():S.tab==="movies"?moviesView():diaryView());
+  else main=fixBanner()+(S.tab==="shows"?showsView():S.tab==="movies"?moviesView():S.tab==="theaters"?theatersView():diaryView());
   app.innerHTML=topbar()+'<main class="wrap">'+main+'</main>'+tabbar();
   if(libFocused){const i=document.getElementById("libq");if(i){i.focus();const v=i.value;i.setSelectionRange(v.length,v.length)}}
   let key="",html="";
@@ -1288,6 +1468,11 @@ const A={
   askDelete:()=>{S.confirm="delete";render()},
   cancelConfirm:()=>{S.confirm=null;render()},
   doDelete:()=>{const id=S.openId;const t=(S.items.get(id)||{}).title;S.openId=null;S.confirm=null;removeItem(id);toast("Deleted "+t)},
+  stOlder:d=>{const st=stInit();st.older=d.v==="1";try{localStorage.setItem("wd-st-older",st.older?"1":"0")}catch(e){}render()},
+  stDay:d=>{stInit().day=d.v;render()},
+  stMore:d=>{const st=stInit();st.more[d.k]=!st.more[d.k];render()},
+  stRefresh:()=>{const st=stInit();if(st.zip)stLoad(true);else render()},
+  stAdd:d=>stAdd(d.k),
   toastAct:()=>{const a=toastAction;document.getElementById("toast").innerHTML="";toastAction=null;if(a)a.fn()}
 };
 document.addEventListener("click",e=>{
@@ -1300,6 +1485,8 @@ document.addEventListener("click",e=>{
 document.addEventListener("submit",e=>{
   e.preventDefault();const f=e.target.dataset.f;
   if(f==="auth")doAuth();
+  else if(f==="tmsKey")stSaveKey(S.settings?"set":"tab");
+  else if(f==="stWhere")stWhere();
   else if(f==="search"){const q=(document.getElementById("q")||{}).value||"";clearTimeout(searchTimer);if(document.activeElement)document.activeElement.blur();runSearch(q)}
 });
 document.addEventListener("input",e=>{
@@ -1313,6 +1500,7 @@ document.addEventListener("change",e=>{
   else if(c==="notes"){const it=clone(S.openId);if((it.notes||"")!==el.value){it.notes=el.value.slice(0,5000);save(S.openId,it)}}
   else if(c==="logNoDate"){S.logNoDate=el.checked;render()}
   else if(c==="logTh"){S.logTh=el.checked}
+  else if(c==="stRadius"){const st=stInit();st.radius=+el.value;if(/^\d{5}$/.test(((document.getElementById("st-zip")||{}).value||"").trim()))stWhere();else render()}
   else if(c==="sortBy"){S.sortBy=Object.assign({},S.sortBy,{[el.dataset.k]:el.value});savePrefs();render()}
   else if(c==="fScore"||c==="fDecade"||c==="fYear"||c==="fTh"){const k=el.dataset.k;const f=Object.assign({},getF(k));f[{fScore:"score",fDecade:"decade",fYear:"fy",fTh:"th"}[c]]=el.value;S.filt=Object.assign({},S.filt,{[k]:f});render()}
   else if(c==="impFile"){const f=el.files&&el.files[0];if(!f)return;
