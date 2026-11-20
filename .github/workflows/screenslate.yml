@@ -3,9 +3,11 @@
 name: Update NYC screenings
 
 on:
-  schedule:
-    - cron: "13 10 * * *"     # ~5-6am New York time
-    - cron: "43 21 * * *"     # ~4-5pm New York time
+  # Paused: Screen Slate's Cloudflare check blocks GitHub's servers (HTTP 403).
+  # Turn back on once Screen Slate allows this fetch.
+  # schedule:
+  #   - cron: "13 10 * * *"     # ~5-6am New York time
+  #   - cron: "43 21 * * *"     # ~4-5pm New York time
   workflow_dispatch: {}        # lets it be run by hand from the Actions tab
 
 permissions:

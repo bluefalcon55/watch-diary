@@ -736,7 +736,7 @@ async function nycLoad(force){
     const doc=await r.json();if(N.seq!==seq)return;
     N.films=nycParse(doc);N.at=Date.parse(doc.updated)||Date.now();N.phase="ready";
     if(st.day==="any"||!N.films.some(f=>f.shows.some(s=>stDayKey(s.dt)===st.day)))st.day=N.films.some(f=>f.shows.some(s=>stDayKey(s.dt)===today()))?today():"any";
-  }catch(e){if(N.seq!==seq)return;N.phase="error";N.err=e.message==="missing"?"NYC listings haven't been fetched yet. They update twice a day; check back soon.":"Couldn't load NYC listings. Check your connection and try again."}
+  }catch(e){if(N.seq!==seq)return;N.phase="error";N.err=e.message==="missing"?"missing":"Couldn't load NYC listings. Check your connection and try again."}
   render();
 }
 let stMatchBusy=false;
@@ -773,6 +773,7 @@ function theatersView(){
   h+='<div class="chips" data-scroll="chips-st"><button class="chip" type="button" aria-pressed="'+st.older+'" data-a="stOlder" data-v="1">Older films</button><button class="chip" type="button" aria-pressed="'+!st.older+'" data-a="stOlder" data-v="0">Everything</button></div>';
   if(V.phase==="idle")return h+(nyc?'<p class="status"><span class="spin"></span>Loading NYC listings…</p>':'<div class="empty"><p>Enter a zip code to see what\'s screening nearby this week. “Older films” shows revivals and re-releases.</p></div>');
   if(V.phase==="loading")return h+'<p class="status"><span class="spin"></span>'+(nyc?"Loading NYC listings…":"Checking theaters near "+esc(st.zip)+"…")+'</p>';
+  if(V.phase==="error"&&V.err==="missing")return h+'<div class="empty"><p>NYC listings aren\'t connected yet. Until then, see what\'s screening on Screen Slate.</p><a class="btn primary" href="https://www.screenslate.com/listings" target="_blank" rel="noopener">Open Screen Slate</a></div>';
   if(V.phase==="error")return h+'<div class="empty"><p>'+esc(V.err)+'</p><button class="btn ghost" type="button" data-a="stRefresh">Try again</button></div>';
   if(days.length>1)h+='<div class="chips st-days" data-scroll="chips-stday">'+[["any",nyc?"Next 2 weeks":"All week"]].concat(days.map(d=>[d,stDayLabel(d)])).map(([k,l])=>'<button class="chip" type="button" aria-pressed="'+(k===st.day)+'" data-a="stDay" data-v="'+k+'">'+esc(l)+'</button>').join("")+'</div>';
   const rank=f=>{const d=stDiary(f);return d&&d[1].shelf==="watchlist"?0:1};
