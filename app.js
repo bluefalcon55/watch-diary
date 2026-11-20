@@ -352,7 +352,10 @@ function favList(kind){return list(kind).filter(([,it])=>isFav(it)).sort((a,b)=>
 function favView(kind){
   const items=favList(kind);
   if(!items.length)return'<div class="empty"><p>No favorite '+(kind==="show"?"shows":"movies")+' yet. Open one and tap “Add to favorites”.</p></div>';
-  return'<p class="result-count">'+items.length+' favorite'+(items.length===1?"":"s")+' · drag the handle to reorder</p><ol class="favs" id="favs" data-kind="'+kind+'">'+items.map(([id,it],i)=>
+  const n=items.length+' favorite'+(items.length===1?"":"s");
+  if(!S.favEdit)return'<div class="fav-bar"><p class="result-count">'+n+'</p><button type="button" class="btn sm ghost" data-a="favEdit">'+ICON.pencil.replace("<svg",'<svg width="14" height="14"')+'Edit order</button></div><div class="fav-grid">'+items.map(([id,it],i)=>
+    '<button class="tile fav-tile" type="button" data-a="open" data-id="'+esc(id)+'"><span class="fav-poster">'+cover(it)+'<span class="fav-rank mono">'+(i+1)+'</span></span><span class="t">'+esc(it.title)+'</span><span class="m">'+esc(it.year||"")+(scoreOf(it)?" · "+scoreOf(it)+"/10":"")+'</span></button>').join("")+'</div>';
+  return'<div class="fav-bar"><p class="result-count">'+n+' · drag to reorder</p><button type="button" class="btn sm primary" data-a="favEdit">'+ICON.check.replace("<svg",'<svg width="14" height="14"')+'Done</button></div><ol class="favs" id="favs" data-kind="'+kind+'">'+items.map(([id,it],i)=>
     '<li data-id="'+esc(id)+'"><button type="button" class="fav-open" data-a="open" data-id="'+esc(id)+'"><span class="fav-n mono">'+(i+1)+'</span>'+cover(it,"","w154")+'<span class="fav-t"><b>'+esc(it.title)+'</b><span>'+esc(it.year||"")+(scoreOf(it)?" · "+scoreOf(it)+"/10":"")+'</span></span></button><span class="drag-h" role="button" aria-label="Drag to reorder">'+ICON.grip+'</span></li>').join("")+'</ol>';
 }
 function favButton(it){return'<button class="btn '+(isFav(it)?"fav-on":"ghost")+' fav-btn" type="button" data-a="toggleFav">'+ICON.star.replace("<svg",'<svg width="16" height="16"')+(isFav(it)?"In favorites":"Add to favorites")+'</button>'}
@@ -1188,9 +1191,10 @@ function openItem(id){S.wEdit=null;S.logTh=false;S.epMenu=null;S.rwSeasonAsk=nul
 const A={
   authMode:d=>{S.authMode=d.v;S.authErr="";S.authMsg="";render()},
   resetPw:()=>resetPassword(),
-  tab:d=>{S.tab=d.v;S.q="";savePrefs();window.scrollTo(0,0);render()},
-  showShelf:d=>{S.showShelf=d.v;savePrefs();render()},
-  movieShelf:d=>{S.movieShelf=d.v;savePrefs();render()},
+  tab:d=>{S.tab=d.v;S.q="";S.favEdit=false;savePrefs();window.scrollTo(0,0);render()},
+  showShelf:d=>{S.showShelf=d.v;S.favEdit=false;savePrefs();render()},
+  movieShelf:d=>{S.movieShelf=d.v;S.favEdit=false;savePrefs();render()},
+  favEdit:()=>{S.favEdit=!S.favEdit;render()},
   dfilter:d=>{S.diaryFilter=d.v;render()},
   dview:d=>{S.diaryView=d.v;savePrefs();render()},
   year:d=>{S.diaryYear+=+d.v;render()},

@@ -459,6 +459,18 @@ button.when{cursor:pointer}
 .fav-t span{font-size:13px;color:var(--muted)}
 .drag-h{width:48px;height:48px;display:grid;place-items:center;color:var(--faint);touch-action:none;cursor:grab;flex:none}
 .drag-h svg{width:22px;height:22px}
+/* favorites display grid */
+.fav-bar{display:flex;align-items:center;justify-content:space-between;gap:10px;margin:0 0 12px}
+.fav-bar .result-count{margin:0}
+.fav-grid{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:22px 14px}
+@media (min-width:620px){.fav-grid{grid-template-columns:repeat(4,minmax(0,1fr))}}
+.fav-tile{gap:8px}
+.fav-poster{position:relative;display:block}
+.fav-poster .cover{border-radius:12px;box-shadow:0 6px 18px rgba(22,26,51,.18)}
+.fav-rank{position:absolute;left:8px;top:8px;min-width:28px;height:28px;padding:0 7px;display:grid;place-items:center;border-radius:999px;background:rgba(22,26,51,.82);color:#fff;font-size:13px;font-weight:500}
+.fav-poster .cv-kind{display:none}
+.fav-tile .t{font-size:15px}
+.fav-tile .m{font-size:12px}
 .fav-btn{margin:10px 0 4px;display:inline-flex;align-items:center;gap:6px}
 .fav-on{background:#FFF4D6;color:#8A5A00;border:1px solid #F2D58A}
 .fav-on svg,.fv-on svg,.ep-fv{color:var(--star)}
