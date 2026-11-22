@@ -475,15 +475,15 @@ button.when{cursor:pointer}
 .fav-tile .t{font-size:15px}
 .fav-tile .m{font-size:12px}
 .fav-btn{margin:10px 0 4px;display:inline-flex;align-items:center;gap:6px}
-.fav-on{background:#FFF4D6;color:#8A5A00;border:1px solid #F2D58A}
-.fav-on svg,.fv-on svg,.ep-fv{color:var(--star)}
-:root{--s-fav:var(--star)}
+.fav-on{background:#FBE3E9;color:#7A1F35;border:1px solid #F2C2CF}
+.fav-on svg,.fv-on svg,.ep-fv{color:var(--heart)}
+:root{--s-fav:var(--heart)}
 /* episode like/fav */
-.lk-on{background:#FBE3E9;color:#7A1F35;border:1px solid #F2C2CF}
-.fv-on{background:#FFF4D6;color:#8A5A00;border:1px solid #F2D58A}
+.lk-on{background:#FFF4D6;color:#8A5A00;border:1px solid #F2D58A}
+.fv-on{background:#FBE3E9;color:#7A1F35;border:1px solid #F2C2CF}
 .btn.sm svg{margin-right:4px}
 .ep-lk,.ep-fv{display:inline-block;width:13px;height:13px;margin-right:5px;vertical-align:-1px}
-.ep-lk{color:var(--heart)}
+.ep-lk{color:var(--star)}
 .ep-lk svg,.ep-fv svg{width:13px;height:13px}
 /* watch editor */
 .wedit{color:var(--muted)!important}
