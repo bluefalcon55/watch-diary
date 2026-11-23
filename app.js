@@ -579,10 +579,16 @@ async function scrLoad(){
   const s=S.scr={phase:"loading",rows:[],check:null};render();
   try{
     const[a,b]=await Promise.all([
-      sb.from("screenings").select("item_id,title,year,theater,show_date,show_times,note,url").or("show_date.is.null,show_date.gte."+today()).order("show_date",{ascending:true,nullsFirst:false}).limit(500),
-      sb.from("screening_checks").select("checked_at,theaters_checked,theaters_missed").order("checked_at",{ascending:false}).limit(1)]);
+      sb.from("screenings").select("item_id,title,year,theater,show_date,show_times,note,url,checked_at").or("show_date.is.null,show_date.gte."+today()).order("show_date",{ascending:true,nullsFirst:false}).limit(2000),
+      sb.from("screening_checks").select("checked_at,theaters_checked,theaters_missed").order("checked_at",{ascending:false}).limit(20)]);
     if(a.error)throw a.error;
-    s.rows=a.data||[];s.check=(b.data||[])[0]||null;s.phase="ready";
+    const checks=b.data||[];s.check=checks[0]||null;
+    // The weekly check only ever adds rows. For each theater, show just the rows from the most recent
+    // check that read that theater (rows written in the same run share its timestamp, within a minute).
+    const last={};checks.forEach(c=>(c.theaters_checked||[]).forEach(t=>{const at=Date.parse(c.checked_at);if(!(t in last)||at>last[t])last[t]=at}));
+    const newest={};(a.data||[]).forEach(r=>{const at=Date.parse(r.checked_at);if(!(r.theater in newest)||at>newest[r.theater])newest[r.theater]=at});
+    s.rows=(a.data||[]).filter(r=>{const at=Date.parse(r.checked_at);const cut=Math.max(newest[r.theater]||0,last[r.theater]||0)-6e4;return at>=cut});
+    s.phase="ready";
   }catch(e){s.phase="error"}
   if(S.scr===s)render();
 }
