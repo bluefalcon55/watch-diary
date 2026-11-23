@@ -552,3 +552,7 @@ a.st-t{color:var(--accent);border-color:#CBD3FB}
 .st-note{font-size:12.5px;color:var(--muted);font-style:italic;margin:0 0 8px}
 .st-tn{font-size:11.5px;color:var(--muted);margin:0 0 4px}
 .st-foot a.link{font-size:12px}
+
+.st-thl{color:inherit;text-decoration:none}
+.st-thl b{text-decoration:underline;text-decoration-color:var(--line);text-underline-offset:3px}
+.st-tn2{font-size:11.5px;color:var(--muted)}
