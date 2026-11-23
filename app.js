@@ -1002,7 +1002,7 @@ function addSheet(enter){
   if(A.results&&A.results.length&&A.phase!=="loading"){
     b+='<ul class="results">'+A.results.map((r,i)=>{const kind=r.media_type==="tv"?"show":"movie";const id=kind+"-"+r.id;const have=S.items.has(id);
       const fake={kind,title:r.title||r.name,year:((r.release_date||r.first_air_date||"").slice(0,4)),poster:r.poster_path};
-      return'<li><button type="button" data-a="pick" data-v="'+i+'">'+cover(fake,"","w92")+'<span><span class="result-badge">'+(kind==="show"?"Series":"Film")+(have?" · in your diary":"")+'</span><br><span class="rt">'+esc(fake.title)+'</span> <span class="rm">'+esc(fake.year)+'</span></span></button></li>'}).join("")+'</ul>';
+      return'<li><button type="button" data-a="pick" data-v="'+i+'">'+cover(fake,"","w92")+'<span><span class="result-badge">'+(kind==="show"?"Series":"Film")+(have?" · in your diary":"")+'</span><br><span class="rt">'+esc(fake.title)+'</span> <span class="rm">'+esc(fake.year)+'</span></span></button>'+(kind==="movie"&&!have&&!A.relink?'<button type="button" class="wl-add" data-a="pickWl" data-v="'+i+'" aria-label="Add '+esc(fake.title)+' to watchlist">'+ICON.plus.replace("<svg",'<svg width="15" height="15"')+'Watchlist</button>':"")+'</li>'}).join("")+'</ul>';
   }else if(A.phase==="results")b+='<p class="status">No matches. Check the spelling or try fewer words.</p>';
   return sheetShell(b,{enter,label:"Add",icon:ICON.x});
 }
@@ -1147,6 +1147,14 @@ function refreshAddList(){
   const fresh=tmp.querySelector(".sheet-body .wrap");
   [...body.children].forEach(ch=>{if(ch.tagName!=="FORM"&&ch.tagName!=="H2")ch.remove()});
   [...fresh.children].forEach(ch=>{if(ch.tagName!=="FORM"&&ch.tagName!=="H2")body.appendChild(ch)});
+}
+async function pickWatchlist(i){
+  const A=S.add;const r=A&&A.results[i];if(!r)return;const id="movie-"+r.id;
+  if(S.items.has(id)){toast("Already in your diary");return}
+  A.results=A.results.slice();A.phase="loading";A.loadingTitle=r.title;render();
+  try{const doc=await buildFromTmdb("movie",r.id);doc.shelf="watchlist";doc.watches=[];save(id,doc);
+    if(S.add===A){A.phase="results";render()}toast("Added "+doc.title+" to your watchlist")}
+  catch(e){if(S.add!==A)return;A.phase="error";A.err="Couldn't load that title from TMDB. Try again.";render()}
 }
 async function pickResult(i){
   const A=S.add;const r=A.results[i];if(!r)return;
@@ -1481,6 +1489,7 @@ const A={
   exportJson:()=>{const blob=new Blob([JSON.stringify({exportedAt:new Date().toISOString(),items:Object.fromEntries(S.items)},null,1)],{type:"application/json"});
     const a=document.createElement("a");a.href=URL.createObjectURL(blob);a.download="watch-diary-backup-"+today()+".json";document.body.appendChild(a);a.click();setTimeout(()=>{URL.revokeObjectURL(a.href);a.remove()},500)},
   pick:d=>pickResult(+d.v),
+  pickWl:d=>pickWatchlist(+d.v),
   retryProv:()=>{const id=S.openId;if(id){delete PROV[id];render();loadProviders(id)}},
   openPicker:()=>{const it=S.items.get(S.openId);if(it&&!it.tmdb)A.openRelink();else openPicker()},
   setPoster:d=>{const P=S.picker;const p=P&&P.posters[+d.v];if(!p)return;const it=clone(P.id);it.poster=p.file_path;S.picker=null;save(P.id,it);toast("Cover updated")},
