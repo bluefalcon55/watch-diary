@@ -606,7 +606,7 @@ function theatersView(){
     const it=g.id&&S.items.get(g.id);
     const cv=cover(it||{kind:"movie",title:g.title,year:g.year},"","w154");
     h+='<article class="st-film"><div class="st-cv">'+(it?'<button type="button" data-a="open" data-id="'+esc(g.id)+'" aria-label="Open '+esc(g.title)+'">'+cv+'</button>':cv)+'</div><div class="st-body">'+
-      '<h3>'+esc(g.title)+'</h3><div class="st-meta">'+(g.year?'<span class="mono">'+g.year+'</span>':"")+(it&&scoreOf(it)?'<span class="st-badge seen">Your score '+scoreOf(it)+'/10</span>':"")+'</div><ul class="st-ths">';
+      '<h3>'+esc(g.title)+'</h3><div class="st-meta">'+(g.year?'<span class="mono">'+g.year+'</span>':"")+(it&&it.shelf==="watchlist"?'<span class="st-badge wl">On your watchlist</span>':it&&scoreOf(it)?'<span class="st-badge seen">Your score '+scoreOf(it)+'/10</span>':"")+'</div><ul class="st-ths">';
     const byTh=new Map();g.rows.forEach(r=>{if(!byTh.has(r.theater))byTh.set(r.theater,[]);byTh.get(r.theater).push(r)});
     byTh.forEach((rs,th)=>{
       const url=rs.find(r=>r.url)?.url;
